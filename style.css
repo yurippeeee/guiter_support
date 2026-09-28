@@ -7,6 +7,7 @@
   --accent: #e2a44a;
   --accent-2: #7ec8a3;
   --diagram-line: #9aa0ab;
+  --line: #333a46;
 }
 
 * { box-sizing: border-box; }
@@ -18,14 +19,69 @@ body {
   color: var(--text);
 }
 
-header {
-  padding: 14px 22px;
+/* 上部固定バー（設定・再生・タブ） */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   background: var(--panel);
-  border-bottom: 1px solid #333a46;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.topbar-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 10px 22px 8px;
   display: flex;
   align-items: center;
-  gap: 26px;
+  gap: 10px 24px;
   flex-wrap: wrap;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.transport label {
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tabs {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 22px;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  padding: 9px 14px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab:hover { color: var(--text); }
+
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 700;
 }
 
 h1 { font-size: 19px; margin: 0; }
@@ -66,8 +122,61 @@ select {
 main {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 18px 22px 60px;
+  padding: 16px 22px 60px;
 }
+
+[hidden] { display: none !important; }
+
+/* セクションカード */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 18px 12px;
+  margin-bottom: 14px;
+}
+
+.card > h2:first-child { margin-top: 0; }
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.card-head h2 { margin: 0; font-size: 14px; color: var(--text); }
+
+.card-head .hint { margin: 0; }
+
+.card-tools { display: flex; gap: 8px; margin-left: auto; }
+
+input[type="checkbox"] { accent-color: var(--accent-2); }
+
+/* 折りたたみ（使い方・保存した進行） */
+details > summary {
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  width: fit-content;
+  margin-top: 8px;
+}
+
+details > summary:hover { color: var(--text); }
+
+.help p, .help ul {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 6px 0 4px;
+  line-height: 1.7;
+}
+
+.help ul { padding-left: 20px; }
+
+.saved-box { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 2px; }
+
 
 h2 {
   font-size: 13px;
@@ -103,14 +212,6 @@ h2 {
 
 .quality-btn { font-size: 13px; padding: 6px 11px; }
 
-.display {
-  margin-top: 22px;
-  background: var(--panel);
-  border: 1px solid #333a46;
-  border-radius: 14px;
-  padding: 18px 20px 10px;
-}
-
 .chord-header {
   display: flex;
   align-items: baseline;
@@ -118,6 +219,8 @@ h2 {
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
+
+.chord-header .spacer { flex: 1; }
 
 .chord-name { font-size: 38px; font-weight: 800; color: var(--accent); }
 
@@ -135,6 +238,17 @@ h2 {
 
 .play-btn:hover { border-color: var(--accent-2); color: var(--accent-2); }
 
+.play-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1d1508;
+  font-weight: 700;
+}
+
+.play-btn.primary:hover { filter: brightness(1.1); color: #1d1508; }
+
+.play-btn.subtle { background: none; color: var(--muted); padding: 6px 14px; font-size: 13px; }
+
 .board-wrap { overflow-x: auto; padding-bottom: 6px; }
 
 .board-wrap svg { display: block; }
@@ -148,10 +262,12 @@ h2 {
 
 .hint { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
 
+.card > .hint:last-child { margin-bottom: 0; }
+
 .voicing-list { display: flex; flex-wrap: wrap; gap: 12px; }
 
 .voicing-card {
-  background: var(--panel);
+  background: var(--panel-2);
   border: 1px solid #333a46;
   border-radius: 12px;
   padding: 10px 8px 8px;
@@ -240,7 +356,7 @@ h2 {
 
 .prog-chip.playing .chip-beats { background: rgba(0, 0, 0, 0.18); color: #1d1508; }
 
-.prog-save-row { margin-top: 14px; }
+.prog-save-row { margin-top: 10px; }
 
 #prog-name {
   background: var(--panel-2);
@@ -373,7 +489,7 @@ h2 {
 }
 
 .fx-card {
-  background: var(--panel);
+  background: var(--panel-2);
   border: 1px solid #333a46;
   border-radius: 12px;
   padding: 12px 14px;
@@ -412,3 +528,16 @@ h2 {
 .fx-card:not(.on) input[type="range"] { opacity: 0.35; }
 
 .fx-value { min-width: 42px; text-align: right; color: var(--text); }
+
+/* スマホ幅 */
+@media (max-width: 640px) {
+  .topbar { position: static; }
+  .topbar-inner { padding: 8px 14px 6px; gap: 8px 14px; }
+  h1 { font-size: 16px; width: 100%; }
+  .transport { margin-left: 0; }
+  .tabs { padding: 0 8px; }
+  .tab { padding: 8px 10px; font-size: 13px; }
+  main { padding: 12px 12px 48px; }
+  .card { padding: 12px 12px 10px; }
+  .chord-name { font-size: 30px; }
+}

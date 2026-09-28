@@ -4,142 +4,204 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ギターコード サポート</title>
-  <link rel="stylesheet" href="style.css?v=13">
+  <link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
-  <header>
-    <h1>🎸 ギターコード サポート</h1>
-    <div class="controls">
-      <label>キー（カポ基準）
-        <select id="key-select"></select>
-      </label>
-      <label>カポ
-        <select id="capo-select"></select>
-      </label>
-      <label>チューニング
-        <select id="tuning-select"></select>
-      </label>
-      <span id="sounding-key" class="sounding-key"></span>
-    </div>
-  </header>
-
-  <main>
-    <section class="picker">
-      <h2>ディグリー</h2>
-      <div id="degrees" class="btn-row"></div>
-      <h2>クオリティ</h2>
-      <div id="qualities" class="btn-row"></div>
-    </section>
-
-    <section class="display">
-      <div class="chord-header">
-        <span id="chord-name" class="chord-name"></span>
-        <span id="voicing-label" class="voicing-label"></span>
-        <button id="btn-strum" class="play-btn">▶ ジャラーン</button>
-        <button id="btn-arpeggio" class="play-btn">♪ アルペジオ</button>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <h1>🎸 ギターコード サポート</h1>
+      <div class="controls">
+        <label>キー（カポ基準）
+          <select id="key-select"></select>
+        </label>
+        <label>カポ
+          <select id="capo-select"></select>
+        </label>
+        <label>チューニング
+          <select id="tuning-select"></select>
+        </label>
+        <span id="sounding-key" class="sounding-key"></span>
       </div>
-      <div id="board-wrap" class="board-wrap"></div>
-      <p class="hint">弦をクリックすると1本ずつ鳴らせます</p>
-    </section>
-
-    <section class="picker">
-      <h2>押さえ方バリエーション</h2>
-      <div id="voicings" class="voicing-list"></div>
-    </section>
-
-    <section class="picker">
-      <h2>コード進行</h2>
-      <div class="prog-controls">
-        <button id="btn-prog-add" class="play-btn">＋ 今のコードを追加</button>
-        <button id="btn-prog-play" class="play-btn">▶ 再生</button>
-        <button id="btn-prog-clear" class="play-btn">クリア</button>
+      <div class="transport">
+        <button id="btn-prog-play" class="play-btn primary">▶ 再生</button>
         <label>BPM <input id="prog-bpm" type="number" min="40" max="220" step="1"></label>
         <label>ストローク <select id="prog-pattern"></select></label>
         <label><input id="prog-loop" type="checkbox"> ループ</label>
       </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab" data-tab="chord" role="tab">コード</button>
+      <button class="tab" data-tab="solo" role="tab">ソロ練習</button>
+      <button class="tab" data-tab="compose" role="tab">作曲</button>
+      <button class="tab" data-tab="editor" role="tab">コード登録</button>
+      <button class="tab" data-tab="settings" role="tab">エフェクト・共有</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- コード進行: コード / ソロ練習 / 作曲 タブで共通表示 -->
+    <section class="card" id="prog-panel">
+      <div class="card-head">
+        <h2>コード進行</h2>
+        <div class="card-tools">
+          <button id="btn-prog-add" class="play-btn">＋ 今のコードを追加</button>
+          <button id="btn-prog-clear" class="play-btn subtle">クリア</button>
+        </div>
+      </div>
       <div id="prog-list" class="btn-row"></div>
-      <div class="prog-controls prog-save-row">
-        <input id="prog-name" placeholder="進行名を付けて保存（同名は上書き）">
-        <button id="btn-prog-save" class="play-btn">💾 保存</button>
-      </div>
-      <div id="saved-progs" class="btn-row"></div>
+      <details class="saved-box">
+        <summary>保存した進行</summary>
+        <div class="prog-controls prog-save-row">
+          <input id="prog-name" placeholder="進行名を付けて保存（同名は上書き）">
+          <button id="btn-prog-save" class="play-btn">💾 保存</button>
+        </div>
+        <div id="saved-progs" class="btn-row"></div>
+      </details>
     </section>
 
-    <section class="picker">
-      <h2>ソロ練習（スケール表示）</h2>
-      <div class="prog-controls">
-        <label><input type="checkbox" id="scale-on"> 表示する</label>
-        <label>ルート <select id="scale-root"></select></label>
-        <label>スケール <select id="scale-type"></select></label>
-        <span class="scale-legend">
-          <span class="lg lg-root">●</span> ルート
-          <span class="lg lg-chord">●</span> 今のコードの構成音
-          <span class="lg lg-note">●</span> スケール音
-        </span>
-      </div>
-      <div id="scale-wrap" class="board-wrap"></div>
-      <p class="hint">進行を再生すると、鳴っているコードの構成音（狙うと外さない音）が緑に切り替わります。音をクリックで試聴できます</p>
-    </section>
+    <!-- コード -->
+    <div class="pane" data-pane="chord">
+      <section class="card">
+        <h2>ディグリー</h2>
+        <div id="degrees" class="btn-row"></div>
+        <h2>クオリティ</h2>
+        <div id="qualities" class="btn-row"></div>
+      </section>
 
-    <section class="picker">
-      <h2>作曲（メロディー・ピアノロール）</h2>
-      <div class="prog-controls">
-        <label><input type="checkbox" id="melody-on"> 表示する</label>
-        <label><input type="checkbox" id="melody-sound"> メロディーを鳴らす（再生時）</label>
-        <label>音色 <select id="melody-timbre">
-          <option value="voice">声</option>
-          <option value="guitar">ギター</option>
-        </select></label>
-        <label><input type="checkbox" id="melody-solo"> ボーカルのみ再生（バッキング消音）</label>
-        <button id="btn-melody-clear" class="play-btn">クリア</button>
-        <span id="melody-count" class="hint"></span>
-      </div>
-      <div id="melody-wrap" class="board-wrap"></div>
-      <p class="hint">行はキーのスケール音（1〜7、上下2オクターブ）なので外れた音になりません。クリックで音を置く（もう一度で削除）/ 右へドラッグで伸ばす / 再生は「コード進行」の▶（バッキングと一緒に鳴り、緑の音は今のコードの構成音）。メロディーは進行の保存・エクスポートに含まれます</p>
-    </section>
+      <section class="card display">
+        <div class="chord-header">
+          <span id="chord-name" class="chord-name"></span>
+          <span id="voicing-label" class="voicing-label"></span>
+          <span class="spacer"></span>
+          <button id="btn-strum" class="play-btn">▶ ジャラーン</button>
+          <button id="btn-arpeggio" class="play-btn">♪ アルペジオ</button>
+        </div>
+        <div id="board-wrap" class="board-wrap"></div>
+        <p class="hint">弦をクリックすると1本ずつ鳴らせます</p>
+      </section>
 
-    <section class="picker">
-      <h2>作曲（バッキング・ピアノロール）</h2>
-      <div class="prog-controls">
-        <label><input type="checkbox" id="backing-on"> 表示する</label>
-        <button id="btn-backing-clear" class="play-btn">クリア</button>
-        <span id="backing-count" class="hint"></span>
-      </div>
-      <div id="backing-wrap" class="board-wrap"></div>
-      <p class="hint">縦6行＝ギターの6弦。<b>そのコードの押さえ方で鳴る弦だけ背景が緑がかり、そこにだけ置けます</b>（縦に複数OK＝和音）。音の高さはコードの押さえ方が決めます。ストロークで「ピアノロール（バッキング）」を選ぶと、再生時にストロークの代わりにこの内容が鳴ります。進行の保存・エクスポートに含まれます</p>
-    </section>
+      <section class="card">
+        <h2>押さえ方バリエーション</h2>
+        <div id="voicings" class="voicing-list"></div>
+      </section>
+    </div>
 
-    <section class="picker">
-      <h2>コード登録（フレットをクリックして押さえ方を入力 / ナット左クリックで開放⇔ミュート）</h2>
-      <div id="editor-wrap" class="board-wrap"></div>
-      <div class="edit-controls">
-        <button id="btn-edit-play" class="play-btn">▶ 試聴</button>
-        <button id="btn-edit-clear" class="play-btn">クリア</button>
+    <!-- ソロ練習 -->
+    <div class="pane" data-pane="solo">
+      <section class="card">
+        <div class="card-head">
+          <h2>ソロ練習（スケール表示）</h2>
+        </div>
+        <div class="prog-controls">
+          <label>ルート <select id="scale-root"></select></label>
+          <label>スケール <select id="scale-type"></select></label>
+          <span class="scale-legend">
+            <span class="lg lg-root">●</span> ルート
+            <span class="lg lg-chord">●</span> 今のコードの構成音
+            <span class="lg lg-note">●</span> スケール音
+          </span>
+        </div>
+        <div id="scale-wrap" class="board-wrap"></div>
+        <details class="help">
+          <summary>使い方</summary>
+          <p>進行を再生すると、鳴っているコードの構成音（狙うと外さない音）が緑に切り替わります。音をクリックで試聴できます。</p>
+        </details>
+      </section>
+    </div>
+
+    <!-- 作曲 -->
+    <div class="pane" data-pane="compose">
+      <section class="card">
+        <div class="card-head">
+          <h2>メロディー</h2>
+          <span id="melody-count" class="hint"></span>
+          <div class="card-tools">
+            <button id="btn-melody-clear" class="play-btn subtle">クリア</button>
+          </div>
+        </div>
+        <div class="prog-controls">
+          <label><input type="checkbox" id="melody-sound"> 再生時に鳴らす</label>
+          <label>音色 <select id="melody-timbre">
+            <option value="voice">声</option>
+            <option value="guitar">ギター</option>
+          </select></label>
+          <label><input type="checkbox" id="melody-solo"> ボーカルのみ再生（バッキング消音）</label>
+        </div>
+        <div id="melody-wrap" class="board-wrap"></div>
+        <details class="help">
+          <summary>使い方</summary>
+          <ul>
+            <li>行はキーのスケール音（1〜7、上下2オクターブ）なので外れた音になりません</li>
+            <li>クリックで音を置く（もう一度で削除）/ 右へドラッグで伸ばす</li>
+            <li>コード境界をドラッグするとコードチェンジの位置を8分音符単位で動かせます</li>
+            <li>上部の ▶ で再生。緑の音は今のコードの構成音、オレンジはテンション</li>
+            <li>メロディーは進行の保存・エクスポートに含まれます</li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>バッキング</h2>
+          <span id="backing-count" class="hint"></span>
+          <div class="card-tools">
+            <button id="btn-backing-clear" class="play-btn subtle">クリア</button>
+          </div>
+        </div>
+        <div id="backing-wrap" class="board-wrap"></div>
+        <details class="help">
+          <summary>使い方</summary>
+          <ul>
+            <li>縦6行＝ギターの6弦。<b>そのコードの押さえ方で鳴る弦だけ背景が緑がかり、そこにだけ置けます</b>（縦に複数OK＝和音）</li>
+            <li>音の高さはコードの押さえ方が決めます</li>
+            <li>ストロークで「ピアノロール（バッキング）」を選ぶと、再生時にストロークの代わりにこの内容が鳴ります</li>
+            <li>進行の保存・エクスポートに含まれます</li>
+          </ul>
+        </details>
+      </section>
+    </div>
+
+    <!-- コード登録 -->
+    <div class="pane" data-pane="editor">
+      <section class="card">
+        <h2>コード登録</h2>
+        <p class="hint">フレットをクリックして押さえ方を入力 / ナット左をクリックで開放⇔ミュート</p>
+        <div id="editor-wrap" class="board-wrap"></div>
+        <div class="edit-controls">
+          <button id="btn-edit-play" class="play-btn">▶ 試聴</button>
+          <button id="btn-edit-clear" class="play-btn subtle">クリア</button>
+        </div>
+        <h2>判定結果</h2>
         <div id="candidates" class="btn-row"></div>
-        <input id="shape-name" placeholder="名前（省略可）">
-        <button id="btn-register" class="play-btn">＋ 登録</button>
-      </div>
-    </section>
+        <div class="edit-controls">
+          <input id="shape-name" placeholder="名前（省略可）">
+          <button id="btn-register" class="play-btn primary">＋ 登録</button>
+        </div>
+      </section>
+    </div>
 
-    <section class="picker" id="share-zone">
-      <h2>共有（コード・進行のインポート / エクスポート）</h2>
-      <div class="prog-controls">
-        <button id="btn-export" class="play-btn">📤 エクスポート</button>
-        <button id="btn-import" class="play-btn">📥 インポート</button>
-        <input type="file" id="import-file" accept=".json,application/json" hidden>
-        <span id="share-status" class="share-status"></span>
-      </div>
-      <p class="hint">登録コードと保存済み進行をJSONファイルとして書き出し / 読み込みできます。ファイルをこのエリアにドラッグ&ドロップしてもインポートできます</p>
-    </section>
+    <!-- エフェクト・共有 -->
+    <div class="pane" data-pane="settings">
+      <section class="card">
+        <h2>エフェクト</h2>
+        <div id="fx-presets" class="btn-row"></div>
+        <div id="fx-panel" class="fx-grid"></div>
+      </section>
 
-    <section class="picker">
-      <h2>エフェクト</h2>
-      <div id="fx-presets" class="btn-row"></div>
-      <div id="fx-panel" class="fx-grid"></div>
-    </section>
+      <section class="card" id="share-zone">
+        <h2>共有（コード・進行のインポート / エクスポート）</h2>
+        <div class="prog-controls">
+          <button id="btn-export" class="play-btn">📤 エクスポート</button>
+          <button id="btn-import" class="play-btn">📥 インポート</button>
+          <input type="file" id="import-file" accept=".json,application/json" hidden>
+          <span id="share-status" class="share-status"></span>
+        </div>
+        <p class="hint">登録コードと保存済み進行をJSONファイルとして書き出し / 読み込みできます。ファイルをこのエリアにドラッグ&ドロップしてもインポートできます</p>
+      </section>
+    </div>
   </main>
 
-  <script src="chords.js?v=13"></script>
-  <script src="app.js?v=13"></script>
+  <script src="chords.js?v=14"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

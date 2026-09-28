@@ -33,17 +33,14 @@ function loadState() {
       s.loop = !!s.loop;
       if (typeof s.pattern !== 'string') s.pattern = 'simple';
       if (!s.scale || typeof s.scale.root !== 'number' || !SCALES.some(x => x.id === s.scale.type)) {
-        s.scale = { on: false, root: 9, type: 'minor-penta' };
+        s.scale = { root: 9, type: 'minor-penta' };
       }
-      s.scale.on = !!s.scale.on;
-      if (!s.melody || typeof s.melody !== 'object') s.melody = { on: false, sound: true, notes: [] };
-      s.melody.on = !!s.melody.on;
+      if (!s.melody || typeof s.melody !== 'object') s.melody = { sound: true, notes: [] };
       s.melody.sound = s.melody.sound !== false;
       s.melody.notes = validMelodyNotes(s.melody.notes);
       if (s.melody.timbre !== 'guitar') s.melody.timbre = 'voice';
       s.melody.solo = !!s.melody.solo;
-      if (!s.backing || typeof s.backing !== 'object') s.backing = { on: false, notes: [] };
-      s.backing.on = !!s.backing.on;
+      if (!s.backing || typeof s.backing !== 'object') s.backing = { notes: [] };
       s.backing.notes = validBackingNotes(s.backing.notes);
       return s;
     }
@@ -77,9 +74,9 @@ function validMelodyNotes(a) {
 const state = loadState() || {
   key: 0, capo: 0, degree: 0, quality: '', voicing: 0, tuning: 0,
   fx: mergedFx(null), progression: [], bpm: 90, loop: false, pattern: 'simple',
-  scale: { on: false, root: 9, type: 'minor-penta' },
-  melody: { on: false, sound: true, notes: [], timbre: 'voice', solo: false },
-  backing: { on: false, notes: [] },
+  scale: { root: 9, type: 'minor-penta' },
+  melody: { sound: true, notes: [], timbre: 'voice', solo: false },
+  backing: { notes: [] },
 };
 
 function saveState() {
@@ -858,10 +855,6 @@ const SB = { nut: 46, fw: 50, top: 26, gap: 26, frets: 15 };
 
 function renderScaleBoard() {
   const wrap = el('scale-wrap');
-  if (!state.scale.on) {
-    wrap.innerHTML = '';
-    return;
-  }
   const capo = state.capo;
   const W = SB.nut + SB.fw * SB.frets + 12;
   const H = SB.top + SB.gap * 5 + 34;
@@ -994,11 +987,6 @@ function removeMelodyOverlaps(keep) {
 
 function renderMelody() {
   const wrap = el('melody-wrap');
-  if (!state.melody.on) {
-    wrap.innerHTML = '';
-    el('melody-count').textContent = '';
-    return;
-  }
   const { segs, total } = melodyTimeline();
   const W = MR.left + total * MR.cw + 8;
   const H = MR.top + MR.rows * MR.rh + 8;
@@ -1222,11 +1210,6 @@ function backingMaxDur(n) {
 
 function renderBacking() {
   const wrap = el('backing-wrap');
-  if (!state.backing.on) {
-    wrap.innerHTML = '';
-    el('backing-count').textContent = '';
-    return;
-  }
   const { segs, total } = melodyTimeline();
   const W = MR.left + total * MR.cw + 8;
   const H = MR.top + BK_ROWS * MR.rh + 8;
@@ -1736,6 +1719,31 @@ function buildFxPresets() {
 }
 
 // ============================================================
+// タブ切り替え（表示中のタブはこのブラウザにだけ記憶）
+// ============================================================
+const TAB_KEY = 'guitar-support-tab';
+// コード進行パネルを出すタブ
+const PROG_TABS = ['chord', 'solo', 'compose'];
+
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(t => {
+    const on = t.dataset.tab === name;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', on);
+  });
+  document.querySelectorAll('.pane').forEach(p => { p.hidden = p.dataset.pane !== name; });
+  el('prog-panel').hidden = !PROG_TABS.includes(name);
+  try { localStorage.setItem(TAB_KEY, name); } catch (e) { /* 保存できなくても動作に支障なし */ }
+}
+
+function initTabs() {
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+  let saved = null;
+  try { saved = localStorage.getItem(TAB_KEY); } catch (e) { /* 無視 */ }
+  showTab(document.querySelector(`.tab[data-tab="${saved}"]`) ? saved : 'chord');
+}
+
+// ============================================================
 // 初期化
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
@@ -1791,10 +1799,6 @@ document.addEventListener('DOMContentLoaded', () => {
   el('btn-prog-save').addEventListener('click', saveCurrentProgression);
   loadSavedProgs();
   renderSavedProgs();
-  el('melody-on').addEventListener('change', e => {
-    state.melody.on = e.target.checked;
-    update(false);
-  });
   el('melody-sound').addEventListener('change', e => {
     state.melody.sound = e.target.checked;
     saveState();
@@ -1809,32 +1813,23 @@ document.addEventListener('DOMContentLoaded', () => {
     saveState();
   });
   el('melody-solo').checked = state.melody.solo;
-  el('backing-on').addEventListener('change', e => {
-    state.backing.on = e.target.checked;
-    update(false);
-  });
   el('btn-backing-clear').addEventListener('click', () => {
     state.backing.notes = [];
     renderBacking();
     saveState();
   });
-  el('backing-on').checked = state.backing.on;
   el('btn-melody-clear').addEventListener('click', () => {
     state.melody.notes = [];
     renderMelody();
     saveState();
   });
-  el('melody-on').checked = state.melody.on;
   el('melody-sound').checked = state.melody.sound;
-  const scOn = el('scale-on');
   const scRoot = el('scale-root');
   const scType = el('scale-type');
   DEGREES.forEach((d, i) => scRoot.add(new Option(d.label, i)));
   SCALES.forEach(sc => scType.add(new Option(sc.name, sc.id)));
-  scOn.checked = state.scale.on;
   scRoot.value = state.scale.root;
   scType.value = state.scale.type;
-  scOn.addEventListener('change', () => { state.scale.on = scOn.checked; update(false); });
   scRoot.addEventListener('change', () => { state.scale.root = Number(scRoot.value); update(false); });
   scType.addEventListener('change', () => { state.scale.type = scType.value; update(false); });
   el('btn-export').addEventListener('click', exportData);
@@ -1864,6 +1859,7 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshEditor();
   });
   el('btn-register').addEventListener('click', registerShape);
+  initTabs();
   loadUserShapes();
   buildFxPresets();
   buildFxPanel();
