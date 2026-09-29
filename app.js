@@ -53,13 +53,13 @@ function validBeats(b) {
   return (typeof b === 'number' && b >= 0.5 && b <= 16 && Number.isInteger(b * 2)) ? b : 4;
 }
 
-// バッキングノートの検証: { t: 8分位置, dur: 長さ, s: 弦0(6弦)..5(1弦) }
+// バッキングノートの検証: { t: 8分位置, dur: 長さ, s: 弦0(6弦)..5(1弦), up?: アップストローク }
 function validBackingNotes(a) {
   return (Array.isArray(a) ? a : []).filter(n =>
     n && Number.isInteger(n.t) && n.t >= 0 &&
     Number.isInteger(n.dur) && n.dur >= 1 &&
     Number.isInteger(n.s) && n.s >= 0 && n.s <= 5
-  ).map(n => ({ t: n.t, dur: n.dur, s: n.s }));
+  ).map(n => (n.up === true ? { t: n.t, dur: n.dur, s: n.s, up: true } : { t: n.t, dur: n.dur, s: n.s }));
 }
 
 // メロディーノートの検証: { t: 8分位置, dur: 長さ, d: スケール行0..14 }
@@ -1181,6 +1181,20 @@ function scheduleMelodyForStep(pos, beatSec) {
 // だけ背景が色付き＆選択可能。縦に複数＝和音。音の高さはコードの押さえ方が決める
 // ============================================================
 const BK_ROWS = 6;
+const BK_DIR_H = 22;       // グリッド下のストローク方向行の高さ
+const BK_STRUM_GAP = 0.03; // 和音を弦ごとにずらす秒数
+
+// 同じ位置で鳴り始めるノート（＝和音）をストローク方向の順に並べる
+// ダウン: 6弦→1弦 / アップ: 1弦→6弦
+function backingChordAt(t) {
+  const group = state.backing.notes.filter(n => n.t === t);
+  const up = group.some(n => n.up);
+  return group.sort((a, b) => (up ? b.s - a.s : a.s - b.s));
+}
+
+function isBackingUp(t) {
+  return state.backing.notes.some(n => n.t === t && n.up);
+}
 
 // セグメントのコードのボイシング（押さえ方）
 function segVoicing(item) {
@@ -1212,7 +1226,8 @@ function renderBacking() {
   const wrap = el('backing-wrap');
   const { segs, total } = melodyTimeline();
   const W = MR.left + total * MR.cw + 8;
-  const H = MR.top + BK_ROWS * MR.rh + 8;
+  const gridBottom = MR.top + BK_ROWS * MR.rh;
+  const H = gridBottom + BK_DIR_H + 4;
   const yOf = s => MR.top + (5 - s) * MR.rh; // s=5(1弦)が最上段
   const xOf = t => MR.left + t * MR.cw;
 
@@ -1243,7 +1258,7 @@ function renderBacking() {
   for (let t = 0; t <= total; t++) {
     const isChord = t === total || segs.some(sg => sg.start === t);
     const isBeat = t % 2 === 0;
-    s += `<line x1="${xOf(t)}" y1="${MR.top}" x2="${xOf(t)}" y2="${H - 8}" stroke="${isChord ? '#69769a' : isBeat ? '#3d4657' : '#2c3340'}" stroke-width="${isChord ? 2 : 1}"/>`;
+    s += `<line x1="${xOf(t)}" y1="${MR.top}" x2="${xOf(t)}" y2="${gridBottom}" stroke="${isChord ? '#69769a' : isBeat ? '#3d4657' : '#2c3340'}" stroke-width="${isChord ? 2 : 1}"/>`;
   }
   for (let r = 0; r <= BK_ROWS; r++) {
     s += `<line x1="${MR.left}" y1="${MR.top + r * MR.rh}" x2="${xOf(total)}" y2="${MR.top + r * MR.rh}" stroke="#2c3340" stroke-width="1"/>`;
@@ -1255,8 +1270,17 @@ function renderBacking() {
   state.backing.notes.forEach(n => {
     s += `<rect class="bk-note" x="${xOf(n.t) + 1.5}" y="${yOf(n.s) + 2.5}" width="${n.dur * MR.cw - 3}" height="${MR.rh - 5}" rx="5"/>`;
   });
+  // ストローク方向（2音以上の和音の下に ↓/↑。クリックで切り替え）
+  s += `<text x="${MR.left - 6}" y="${gridBottom + 15}" text-anchor="end" class="mel-row-label lo">向き</text>`;
+  for (const t of new Set(state.backing.notes.map(n => n.t))) {
+    if (backingChordAt(t).length < 2) continue;
+    const up = isBackingUp(t);
+    s += `<g class="bk-dir${up ? ' up' : ''}" data-t="${t}"><title>${up ? 'アップ（1弦→6弦）' : 'ダウン（6弦→1弦）'}：クリックで切り替え</title>` +
+      `<rect x="${xOf(t) + 1.5}" y="${gridBottom + 3}" width="${MR.cw - 3}" height="${BK_DIR_H - 5}" rx="4"/>` +
+      `<text x="${xOf(t) + MR.cw / 2}" y="${gridBottom + 16}" text-anchor="middle">${up ? '↑' : '↓'}</text></g>`;
+  }
   // 再生ヘッド
-  s += `<line id="backing-playhead" x1="-10" y1="${MR.top}" x2="-10" y2="${H - 8}" stroke="#ff7b6b" stroke-width="2" visibility="hidden"/>`;
+  s += `<line id="backing-playhead" x1="-10" y1="${MR.top}" x2="-10" y2="${gridBottom}" stroke="#ff7b6b" stroke-width="2" visibility="hidden"/>`;
   s += '</svg>';
 
   wrap.innerHTML = s;
@@ -1269,6 +1293,12 @@ let bkDrag = null;
 function attachBackingMousedown(svg) {
   svg.addEventListener('mousedown', e => {
     if (tryStartBoundaryDrag(e)) return;
+    const dirEl = e.target.closest('.bk-dir');
+    if (dirEl) {
+      e.preventDefault();
+      toggleBackingDir(Number(dirEl.dataset.t));
+      return;
+    }
     const r = svg.getBoundingClientRect();
     const x = e.clientX - r.left;
     const y = e.clientY - r.top;
@@ -1285,6 +1315,7 @@ function attachBackingMousedown(svg) {
       const v = seg ? segVoicing(seg.item) : null;
       if (!v || v.frets[si] < 0) return; // そのコードで鳴らない弦には置けない
       const note = { t, dur: 1, s: si };
+      if (isBackingUp(t)) note.up = true; // 同じ位置の和音の向きに合わせる
       state.backing.notes.push(note);
       pluck(stringMidi(si, v.frets[si]), audio().currentTime + 0.02, 0.85);
       bkDrag = { note, del: false, moved: false, stack: [note] };
@@ -1328,6 +1359,7 @@ document.addEventListener('mousemove', e => {
       if (row === n.s || v.frets[row] < 0) continue;
       if (backingNoteAt(n.t, row)) continue;
       const note2 = { t: n.t, dur: n.dur, s: row };
+      if (n.up) note2.up = true;
       state.backing.notes.push(note2);
       bkDrag.stack.push(note2);
       pluck(stringMidi(row, v.frets[row]), audio().currentTime + 0.02, 0.7);
@@ -1361,6 +1393,26 @@ document.addEventListener('mouseup', () => {
   bkDrag = null;
 });
 
+// 和音のストローク方向をダウン⇔アップで切り替え、試しに鳴らす
+function toggleBackingDir(t) {
+  const up = !isBackingUp(t);
+  for (const n of state.backing.notes) {
+    if (n.t !== t) continue;
+    if (up) n.up = true;
+    else delete n.up;
+  }
+  const seg = backingSegAt(t);
+  const v = seg ? segVoicing(seg.item) : null;
+  if (v) {
+    const base = audio().currentTime + 0.02;
+    backingChordAt(t).forEach((n, i) => {
+      if (v.frets[n.s] >= 0) pluck(stringMidi(n.s, v.frets[n.s]), base + i * BK_STRUM_GAP, 0.85);
+    });
+  }
+  renderBacking();
+  saveState();
+}
+
 // バッキングの再生スケジュール（ストローク「ピアノロール」選択時に使われる）
 // 音の高さはそのコードの押さえ方から決まる
 function scheduleBackingForStep(pos, beatSec) {
@@ -1370,10 +1422,13 @@ function scheduleBackingForStep(pos, beatSec) {
   const v = segVoicing(seg.item);
   if (!v) return;
   const base = audio().currentTime + 0.05;
-  for (const n of state.backing.notes) {
-    if (n.t >= seg.start && n.t < seg.start + seg.steps && v.frets[n.s] >= 0) {
-      progSources.push(pluck(stringMidi(n.s, v.frets[n.s]), base + (n.t - seg.start) * beatSec / 2, 0.85));
-    }
+  const starts = new Set(state.backing.notes.map(n => n.t).filter(t => t >= seg.start && t < seg.start + seg.steps));
+  for (const t of starts) {
+    // 和音はストローク方向の順に少しずつずらして鳴らす
+    const notes = backingChordAt(t).filter(n => v.frets[n.s] >= 0);
+    notes.forEach((n, i) => {
+      progSources.push(pluck(stringMidi(n.s, v.frets[n.s]), base + (t - seg.start) * beatSec / 2 + i * BK_STRUM_GAP, 0.85));
+    });
   }
 }
 
