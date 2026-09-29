@@ -547,3 +547,122 @@ h2 {
   .card { padding: 12px 12px 10px; }
   .chord-name { font-size: 30px; }
 }
+
+/* フレーズ→TAB: この機能では全体のキー・カポ・再生を使わないので隠す */
+body[data-tab="phrase"] .topbar .controls,
+body[data-tab="phrase"] .transport { display: none; }
+
+.num-input {
+  width: 64px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid #3c4454;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 14px;
+}
+
+.ph-summary { font-size: 13px; color: var(--muted); }
+.ph-summary b { color: var(--accent); }
+.warn { color: #ff9b8b; }
+
+.ph-capo-cands { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 26px; }
+.ph-capo-cands .hint { margin: 0 4px 0 0; }
+
+.ph-cand {
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid #3c4454;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ph-cand:hover { border-color: var(--accent); color: var(--text); }
+.ph-cand.best { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+.ph-transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.ph-transport label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.ph-seek { flex: 1; min-width: 160px; accent-color: var(--accent); }
+.ph-pos { font-size: 12px; color: var(--muted); min-width: 70px; text-align: right; }
+
+.ph-info {
+  font-size: 13px;
+  min-height: 40px;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+
+.ph-info-pos { color: var(--muted); margin-right: 10px; }
+.ph-info-tech { font-weight: 700; margin-right: 10px; }
+
+.ph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.ph-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+
+.ph-legend .muted { opacity: 0.8; }
+.lg-pick { background: var(--accent); }
+.lg-legato { background: var(--accent-2); }
+.lg-slide { background: #7fa8e0; }
+.lg-tap { background: #e07fb8; }
+.lg-chord { background: #b99be6; }
+.lg-approx { border: 1.5px dashed #ff7b6b; }
+
+.ph-scroll { overflow-x: auto; padding-bottom: 6px; }
+.ph-scroll svg { display: block; user-select: none; }
+#ph-tab-svg { cursor: pointer; }
+
+.ph-tab-label { fill: var(--muted); font-size: 12px; font-weight: 700; font-family: inherit; }
+.ph-str-label { fill: var(--muted); font-size: 10px; font-family: inherit; }
+.ph-bar-num { fill: var(--muted); font-size: 10px; font-family: inherit; }
+.ph-tech-mark { font-size: 11px; font-weight: 700; font-family: inherit; }
+.ph-fret { font-size: 11px; font-weight: 700; font-family: inherit; }
+.ph-fret.approx { text-decoration: underline; }
+.ph-hand-label { fill: var(--accent-2); font-size: 11px; font-family: inherit; }
+
+.ph-key-label { fill: #9aa0ab; font-size: 8.5px; font-family: inherit; }
+.ph-key-label.w { fill: #2a2f3a; }
+.ph-key-label.tonic { font-weight: 700; fill: #b5651d; }
+
+.ph-note { cursor: pointer; }
+.ph-note:hover { stroke: #fff; stroke-width: 1.2; }
+
+/* 奏法ごとの色 */
+.t-pick { fill: var(--accent); }
+.t-legato { fill: var(--accent-2); }
+.t-slide { fill: #7fa8e0; }
+.t-tap { fill: #e07fb8; }
+.t-chord { fill: #b99be6; }
+.t-approx { stroke: #ff7b6b; stroke-width: 2; stroke-dasharray: 3 2; }
+.t-drop { fill: #4a4f5a; }
+.t-pick-txt { fill: var(--accent); color: var(--accent); }
+.t-legato-txt { fill: var(--accent-2); color: var(--accent-2); }
+.t-slide-txt { fill: #7fa8e0; color: #7fa8e0; }
+.t-tap-txt { fill: #e07fb8; color: #e07fb8; }
+.t-chord-txt { fill: #b99be6; color: #b99be6; }
+
+.ph-dot.open { fill: none; stroke: var(--accent-2); stroke-width: 2; }
+.ph-dot-label { fill: #1d1508; font-size: 12px; font-weight: 800; font-family: inherit; pointer-events: none; }
+.ph-dot-label.open { fill: var(--accent-2); }

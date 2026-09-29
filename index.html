@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ギターコード サポート</title>
-  <link rel="stylesheet" href="style.css?v=15">
+  <link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
   <header class="topbar">
@@ -33,6 +33,7 @@
       <button class="tab" data-tab="chord" role="tab">コード</button>
       <button class="tab" data-tab="solo" role="tab">ソロ練習</button>
       <button class="tab" data-tab="compose" role="tab">作曲</button>
+      <button class="tab" data-tab="phrase" role="tab">フレーズ→TAB</button>
       <button class="tab" data-tab="editor" role="tab">コード登録</button>
       <button class="tab" data-tab="settings" role="tab">エフェクト・共有</button>
     </nav>
@@ -181,6 +182,68 @@
       </section>
     </div>
 
+    <!-- フレーズ→TAB（独立機能: 独自のキー・チューニング・カポ・テンポを持つ） -->
+    <div class="pane" data-pane="phrase">
+      <section class="card">
+        <div class="card-head">
+          <h2>フレーズ→TAB（自動運指）</h2>
+          <div class="card-tools">
+            <button id="ph-clear" class="play-btn subtle">クリア</button>
+          </div>
+        </div>
+        <div class="prog-controls">
+          <label>キー <select id="ph-key"></select></label>
+          <label>チューニング <select id="ph-tuning"></select></label>
+          <label>BPM <input id="ph-bpm" class="num-input" type="number" min="40" max="240" step="1"></label>
+          <label>小節 <select id="ph-bars"></select></label>
+          <label>カポ <select id="ph-capo"></select></label>
+          <span id="ph-summary" class="ph-summary"></span>
+        </div>
+        <div id="ph-capo-cands" class="ph-capo-cands"></div>
+      </section>
+
+      <section class="card">
+        <div class="ph-transport">
+          <button id="ph-first" class="play-btn subtle" title="先頭へ">⏮</button>
+          <button id="ph-prev" class="play-btn subtle" title="前の音へ">◀ 前の音</button>
+          <button id="ph-play" class="play-btn primary">▶ 再生</button>
+          <button id="ph-next" class="play-btn subtle" title="次の音へ">次の音 ▶</button>
+          <label><input id="ph-loop" type="checkbox"> ループ</label>
+          <input id="ph-seek" class="ph-seek" type="range" min="0" step="1" value="0" aria-label="再生位置">
+          <span id="ph-pos" class="ph-pos"></span>
+        </div>
+        <div id="ph-info" class="ph-info"></div>
+        <div id="ph-board" class="board-wrap"></div>
+        <div class="ph-legend">
+          <span><i class="lg-pick"></i>ピッキング</span>
+          <span><i class="lg-legato"></i>ハンマリング(h) / プリング(p)</span>
+          <span><i class="lg-slide"></i>スライド(/ \)</span>
+          <span><i class="lg-tap"></i>タッピング(T)</span>
+          <span><i class="lg-chord"></i>和音</span>
+          <span><i class="lg-approx"></i>近似音(≈)</span>
+          <span class="muted">指板の数字＝押さえる指（1人差し指〜4小指, T右手）・帯＝左手の位置</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div id="ph-scroll" class="ph-scroll">
+          <div id="ph-tab"></div>
+          <div id="ph-roll"></div>
+        </div>
+        <details class="help">
+          <summary>使い方</summary>
+          <ul>
+            <li>下のピアノロールでフレーズを入力: クリックで音を置く（もう一度で削除）/ 右へドラッグで長さを伸ばす / 同じタイミングに複数置くと和音</li>
+            <li>明るい行（白鍵）がキーのスケール音。Gキーなら、Cキーのときの「ド」の段が「ソ」になります</li>
+            <li>入力するたびに、押さえる位置・指・奏法・カポ位置を自動で最適化してTABに表示します</li>
+            <li>▶で指板の押さえる位置が流れて音も鳴ります。シークバー・前後ボタン・TAB欄のクリックで好きな位置を確認できます</li>
+            <li>ギターで出せない音はオクターブをずらした近似音（≈）、押さえきれない和音の音は省略して表示します</li>
+            <li>TABの数字はカポからの相対フレットです</li>
+          </ul>
+        </details>
+      </section>
+    </div>
+
     <!-- エフェクト・共有 -->
     <div class="pane" data-pane="settings">
       <section class="card">
@@ -202,7 +265,9 @@
     </div>
   </main>
 
-  <script src="chords.js?v=15"></script>
-  <script src="app.js?v=15"></script>
+  <script src="chords.js?v=16"></script>
+  <script src="tab-engine.js?v=16"></script>
+  <script src="app.js?v=16"></script>
+  <script src="phrase.js?v=16"></script>
 </body>
 </html>

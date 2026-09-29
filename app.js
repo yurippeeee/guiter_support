@@ -1788,6 +1788,7 @@ function showTab(name) {
   });
   document.querySelectorAll('.pane').forEach(p => { p.hidden = p.dataset.pane !== name; });
   el('prog-panel').hidden = !PROG_TABS.includes(name);
+  document.body.dataset.tab = name; // タブ固有の見た目切り替え用（フレーズ→TABでは全体設定を隠す）
   try { localStorage.setItem(TAB_KEY, name); } catch (e) { /* 保存できなくても動作に支障なし */ }
 }
 
