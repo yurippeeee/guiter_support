@@ -25,7 +25,7 @@ const TECH_INFO = {
 };
 
 function loadPhrase() {
-  const def = { key: 0, tuning: 0, bpm: 100, bars: 4, capo: 'auto', loop: false, notes: [] };
+  const def = { key: 0, tuning: 0, bpm: 100, bars: 4, capo: 'auto', reach: 4, loop: false, notes: [] };
   try {
     const s = JSON.parse(localStorage.getItem(PH_KEY));
     if (!s || typeof s !== 'object') return def;
@@ -35,6 +35,7 @@ function loadPhrase() {
       bpm: typeof s.bpm === 'number' ? Math.min(240, Math.max(40, s.bpm)) : 100,
       bars: [1, 2, 4, 8, 16].includes(s.bars) ? s.bars : 4,
       capo: s.capo === 'auto' || (Number.isInteger(s.capo) && s.capo >= 0 && s.capo <= TabEngine.CAPO_MAX) ? s.capo : 'auto',
+      reach: s.reach === 3 ? 3 : 4,
       loop: !!s.loop,
       notes: (Array.isArray(s.notes) ? s.notes : []).filter(n =>
         n && Number.isInteger(n.t) && n.t >= 0 && Number.isInteger(n.dur) && n.dur >= 1 &&
@@ -79,6 +80,7 @@ function solvePhrase() {
     open: OPEN_MIDI.map(m => m + offset),
     stepSec: phStepSec(),
     capo: ph.capo,
+    reach: ph.reach,
   });
   phNoteInfo = new Map();
   phResult.events.forEach((ev, i) => {
@@ -670,6 +672,12 @@ document.addEventListener('DOMContentLoaded', () => {
     ph.capo = capo.value === 'auto' ? 'auto' : Number(capo.value);
     phChanged();
   });
+
+  const reach = el('ph-reach');
+  reach.add(new Option('普通（4フレット）', 4));
+  reach.add(new Option('小さめ（3フレット・小指なし）', 3));
+  reach.value = ph.reach;
+  reach.addEventListener('change', () => { ph.reach = Number(reach.value); phChanged(); });
 
   el('ph-loop').checked = ph.loop;
   el('ph-loop').addEventListener('change', e => { ph.loop = e.target.checked; savePhrase(); });

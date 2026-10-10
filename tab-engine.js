@@ -8,7 +8,7 @@
 //
 // 手順:
 //  1. 同時に鳴り始める音を1イベント（和音）にまとめる
-//  2. 各イベントの押さえ方候補を列挙（弦の重複なし・手の届く範囲・左手位置）
+//  2. 各イベントの押さえ方候補を列挙（弦の重複なし・手の届く範囲に全部収まる・指の割り当てが可能）
 //     押さえられない音はオクターブ移動で近似、和音で無理な音は省略
 //  3. 移動コスト（ポジション移動×速さ、弦移動、ストレッチ…）の合計が最小になる
 //     経路を動的計画法（ビタビ）で求める
@@ -26,7 +26,7 @@ const TabEngine = (() => {
     approxOct: 12,    // 1オクターブずらした近似音
     drop: 25,         // 和音から省略した音
     dropDup: 3,       // 和音から省略した音（同じ音名がほかにあるので響きは変わらない）
-    stretch: 1.2,     // 4フレットを超える指の開き
+    reverse: 1.0,     // 指が弦をまたいで逆向きに開く形（低い弦ほど遠いフレット）1フレットあたり
     barre: 1.0,       // セーハ
     stringSkip: 0.4,  // 和音で間の弦をミュート
     handHeight: 0.03, // ハイポジションほど少し不利
@@ -86,11 +86,11 @@ const TabEngine = (() => {
     return opts;
   }
 
+  // 手の届く範囲（フレット数）。4 = 人差し指〜小指で1フレット1本、3 = 小指を使わない（手が小さめ）
+  let REACH = 4;
+
   // 押さえるフレット群に対する左手位置（人差し指のフレット）の候補とコスト
-  // 指は1フレット1本（人差し指=h 〜 小指=h+3）。はみ出しは片側1フレットまで:
-  //   h+4 は小指を伸ばす（h+3 に押さえる音がないときだけ）
-  //   h-1 は人差し指を戻す（h に押さえる音がないときだけ）
-  // 和音で同じ指が別のフレットを押さえる・両側にはみ出す、といった人の手で無理な形は候補にしない
+  // 押さえる音はすべて手の範囲（h 〜 h+REACH-1）に収める。はみ出す（ストレッチ）くらいなら手を動かす
   function handOptions(frets, capo) {
     const lo = capo + 1;
     const hi = MAX_FRET - 3;
@@ -103,30 +103,18 @@ const TabEngine = (() => {
     const distinct = [...new Set(frets)];
     const minF = Math.min(...distinct);
     const maxF = Math.max(...distinct);
-    if (maxF - minF > 4 || distinct.length > 4) return [];
+    if (maxF - minF > REACH - 1 || distinct.length > REACH) return [];
     let base = 0;
     if (frets.length > 4) {
       // 5音以上はセーハ前提: 最低フレット以外が3指で押さえられること
       if (frets.filter(f => f !== minF).length > 3) return [];
       base += W.barre;
     }
+    // 押さえにくさは指板上の実際の位置で決まる（カポを付けても同じ）
+    const high12 = distinct.reduce((a, f) => a + Math.max(0, f - 12), 0);
     const out = [];
-    for (let h = Math.max(lo, maxF - 4); h <= Math.min(hi, minF + 1); h++) {
-      let c = base;
-      let ok = true;
-      let low = false;
-      let high = false;
-      for (const f of distinct) {
-        if (f >= h && f <= h + 3) continue;
-        if (f === h + 4 && !distinct.includes(h + 3)) { high = true; c += W.stretch; }
-        else if (f === h - 1 && !distinct.includes(h)) { low = true; c += W.stretch; }
-        else { ok = false; break; }
-      }
-      if (ok && !(low && high)) {
-        // 押さえにくさは指板上の実際の位置で決まる（カポを付けても同じ）
-        const high12 = distinct.reduce((a, f) => a + Math.max(0, f - 12), 0);
-        out.push({ hand: h, cost: c + W.handHeight * h + W.highFret * high12 });
-      }
+    for (let h = Math.max(lo, maxF - REACH + 1); h <= Math.min(hi, minF); h++) {
+      out.push({ hand: h, cost: base + W.handHeight * h + W.highFret * high12 });
     }
     return out;
   }
@@ -198,6 +186,14 @@ const TabEngine = (() => {
         const lo = Math.min(...ss);
         const hi = Math.max(...ss);
         extra += W.stringSkip * ((hi - lo + 1) - ss.length);
+      }
+      // 低い弦（6弦側）ほど遠いフレットを押さえる形は、指が逆向きに開くので押さえにくい
+      const fp = sounded.filter(p => p.f > capo);
+      for (let x = 0; x < fp.length; x++) {
+        for (let y = 0; y < fp.length; y++) {
+          const df = fp[y].f - fp[x].f;
+          if (df >= 2 && fp[y].s < fp[x].s) extra += W.reverse * (df - 1);
+        }
       }
       for (const h of handOptions(fretted, capo)) {
         if (sounded.length > 1 && !fingersOk(sounded, h.hand, capo)) continue;
@@ -321,8 +317,9 @@ const TabEngine = (() => {
   }
 
   // メイン: notes と設定から最適な運指を求める
-  // opts: { open: 6弦→1弦の開放弦MIDI, stepSec: 16分1つの秒数, capo: 'auto' | 数値 }
+  // opts: { open: 6弦→1弦の開放弦MIDI, stepSec: 16分1つの秒数, capo: 'auto' | 数値, reach: 3 | 4（手の届くフレット数） }
   function solve(notes, opts) {
+    REACH = opts.reach === 3 ? 3 : 4;
     const events = groupEvents(notes);
     const capos = opts.capo === 'auto' ? [...Array(CAPO_MAX + 1).keys()] : [opts.capo];
     const results = capos.map(c => solveWithCapo(events, opts.open, c, opts.stepSec));
