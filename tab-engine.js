@@ -25,12 +25,14 @@ const TabEngine = (() => {
   const W = {
     approxOct: 12,    // 1オクターブずらした近似音
     drop: 25,         // 和音から省略した音
+    dropDup: 3,       // 和音から省略した音（同じ音名がほかにあるので響きは変わらない）
     stretch: 1.2,     // 4フレットを超える指の開き
     barre: 1.0,       // セーハ
     stringSkip: 0.4,  // 和音で間の弦をミュート
-    handHeight: 0.04, // ハイポジションほど少し不利
-    shiftBase: 1.0,   // ポジション移動の基本コスト
-    shiftPer: 0.5,    // 1フレット移動あたり
+    handHeight: 0.02, // ハイポジションほど少し不利
+    shiftBase: 2.5,   // ポジション移動の基本コスト（手が動くこと自体が弾きにくい）
+    shiftPer: 0.6,    // 1フレット移動あたり
+    shiftFree: 0.6,   // 休符や開放弦の間に動ける移動は少し楽（倍率）
     crossing: 0.12,   // 単音の弦移動
     legato: -0.3,     // 速い同弦フレーズ（レガート可能）への優遇
     tap: 2.5,         // タッピング
@@ -66,7 +68,8 @@ const TabEngine = (() => {
   }
 
   // 1音の選択肢: そのまま / オクターブ近似 / 省略（和音のみ）
-  function noteOptions(note, open, capo, allowDrop) {
+  // dupInChord: 同じ音名の音が和音の中にほかにある
+  function noteOptions(note, open, capo, allowDrop, dupInChord) {
     let opts = directCands(note.midi, open, capo).map(c => ({ ...c, midi: note.midi, approx: 0, cost: 0 }));
     if (!opts.length) {
       for (const k of [12, 24]) {
@@ -78,7 +81,7 @@ const TabEngine = (() => {
         if (opts.length) break;
       }
     }
-    if (allowDrop) opts.push({ drop: true, midi: note.midi, cost: W.drop });
+    if (allowDrop) opts.push({ drop: true, midi: note.midi, cost: dupInChord ? W.dropDup : W.drop });
     return opts;
   }
 
@@ -118,10 +121,12 @@ const TabEngine = (() => {
   // イベントの押さえ方候補（状態）を列挙
   function eventStates(ev, open, capo) {
     const multi = ev.notes.length > 1;
-    const optsPer = ev.notes.map(n => noteOptions(n, open, capo, multi));
+    const pcs = ev.notes.map(n => ((n.midi % 12) + 12) % 12);
+    const optsPer = ev.notes.map((n, i) => noteOptions(n, open, capo, multi, pcs.some((pc, j) => j !== i && pc === pcs[i])));
     const assigns = [];
     const cur = [];
     const used = new Set();
+    const usedMidi = new Map(); // 鳴らす実音 → 回数（近似で同じ音が重なるのを防ぐ）
     (function rec(i, cost) {
       if (assigns.length > 4000) return;
       if (i === optsPer.length) {
@@ -130,11 +135,18 @@ const TabEngine = (() => {
       }
       for (const o of optsPer[i]) {
         if (!o.drop && used.has(o.s)) continue;
-        if (!o.drop) used.add(o.s);
+        if (!o.drop && o.approx && usedMidi.get(o.midi)) continue;
+        if (!o.drop) {
+          used.add(o.s);
+          usedMidi.set(o.midi, (usedMidi.get(o.midi) || 0) + 1);
+        }
         cur.push({ ...o, note: i });
         rec(i + 1, cost + o.cost);
         cur.pop();
-        if (!o.drop) used.delete(o.s);
+        if (!o.drop) {
+          used.delete(o.s);
+          usedMidi.set(o.midi, usedMidi.get(o.midi) - 1);
+        }
       }
     })(0, 0);
 
@@ -151,7 +163,7 @@ const TabEngine = (() => {
         extra += W.stringSkip * ((hi - lo + 1) - ss.length);
       }
       for (const h of handOptions(fretted, capo)) {
-        states.push({ picks: a.picks, hand: h.hand, tap: false, cost: a.cost + extra + h.cost });
+        states.push({ picks: a.picks, hand: h.hand, tap: false, openOnly: !fretted.length, cost: a.cost + extra + h.cost });
       }
     }
     // タッピング候補（単音のみ）: 左手はそのまま、右手で遠いフレットを叩く
@@ -170,8 +182,10 @@ const TabEngine = (() => {
   const soundedOf = st => st.picks.filter(p => !p.drop);
 
   // 状態間の移動コスト
-  function transition(prev, cur, dtSec) {
-    const speed = clamp(0.25 / Math.max(dtSec, 0.01), 0.4, 5);
+  // free: 前の音が休符で終わっている・開放弦だけ、など左手が空いている間に動ける
+  function transition(prev, cur, dtSec, free) {
+    // 速いほど移動は難しい。ゆっくりでも移動そのものはタダにしない（下限1）
+    const speed = clamp(0.25 / Math.max(dtSec, 0.01), 1, 4);
     const ps = soundedOf(prev);
     const cs = soundedOf(cur);
     const single = ps.length === 1 && cs.length === 1;
@@ -183,7 +197,8 @@ const TabEngine = (() => {
       return c;
     }
     const shift = Math.abs(cur.hand - prev.hand);
-    let c = shift ? (W.shiftBase + shift * W.shiftPer) * speed : 0;
+    const handFree = free || prev.openOnly; // 開放弦だけを鳴らしている間は左手が空いている
+    let c = shift ? (W.shiftBase + shift * W.shiftPer) * speed * (handFree ? W.shiftFree : 1) : 0;
     if (single) {
       c += W.crossing * Math.abs(cs[0].s - ps[0].s);
       const df = Math.abs(cs[0].f - ps[0].f);
@@ -206,6 +221,7 @@ const TabEngine = (() => {
     const back = [layers[0].map(() => -1)];
     for (let i = 1; i < events.length; i++) {
       const dtSec = (events[i].t - events[i - 1].t) * stepSec;
+      const free = events[i - 1].t + events[i - 1].dur < events[i].t; // 前の音のあとに休符がある
       const nd = [];
       const nb = [];
       for (const cur of layers[i]) {
@@ -213,7 +229,7 @@ const TabEngine = (() => {
         let arg = -1;
         layers[i - 1].forEach((prev, j) => {
           if (dp[j] === Infinity) return;
-          const v = dp[j] + transition(prev, cur, dtSec);
+          const v = dp[j] + transition(prev, cur, dtSec, free);
           if (v < best) { best = v; arg = j; }
         });
         nd.push(best + cur.cost);

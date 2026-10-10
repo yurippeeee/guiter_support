@@ -91,6 +91,23 @@ function solvePhrase() {
   phShownEvent = -2;
 }
 
+// 左手が同じ位置にいる区間（開放弦だけ・タッピングの音は手が自由なので区間に含める）
+function phHandBlock(i) {
+  const r = phResult;
+  if (!r || i < 0 || !r.path[i]) return null;
+  const free = k => r.path[k].openOnly || r.path[k].tap;
+  // 開放弦だけの音にいるときは、前後で押さえている位置を基準にする
+  let k0 = i;
+  while (k0 > 0 && free(k0)) k0--;
+  if (free(k0)) { k0 = i; while (k0 < r.events.length - 1 && free(k0)) k0++; }
+  const hand = r.path[k0].hand;
+  let from = i;
+  let to = i;
+  while (from > 0 && (free(from - 1) || r.path[from - 1].hand === hand)) from--;
+  while (to < r.events.length - 1 && (free(to + 1) || r.path[to + 1].hand === hand)) to++;
+  return { from, to, hand };
+}
+
 function phEventAt(c) {
   if (!phResult) return -1;
   let idx = -1;
@@ -141,7 +158,7 @@ function renderPhSummary() {
 function renderPhTab() {
   const steps = phSteps();
   const W = PR.left + steps * PR.cw + 8;
-  const H = TB.top + TB.gap * 5 + 14;
+  const H = TB.top + TB.gap * 5 + 26;
   const xOf = t => PR.left + t * PR.cw;
   const yOf = s => TB.top + (5 - s) * TB.gap;
   const r = phResult;
@@ -174,6 +191,18 @@ function renderPhTab() {
       s += `<text x="${cx}" y="${yOf(p.s) + 4}" text-anchor="middle" class="ph-fret ${info.cls}-txt${p.approx ? ' approx' : ''}">${txt}</text>`;
     }
   });
+  // 左手のポジション：動くところにだけ書く
+  let lastHand = null;
+  for (let i = 0; i < r.events.length; ) {
+    const b = phHandBlock(i);
+    if (!b) break;
+    if (b.hand !== lastHand) {
+      const x = xOf(r.events[b.from].t) + 2;
+      s += `<text x="${x}" y="${H - 3}" class="ph-pos-mark">${lastHand == null ? '' : '⇢'}${b.hand - r.capo}f〜</text>`;
+      lastHand = b.hand;
+    }
+    i = b.to + 1;
+  }
   s += `<line id="ph-tab-head" x1="0" y1="14" x2="0" y2="${H}" stroke="#ff7b6b" stroke-width="2"/>`;
   s += '</svg>';
   const wrap = el('ph-tab');
@@ -309,12 +338,21 @@ function renderPhBoard() {
 
   let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
   s += `<rect x="${FB.nut}" y="${FB.top - 10}" width="${FB.fw * FB.frets}" height="${FB.gap * 5 + 20}" fill="#3a2a1e"/>`;
-  // 左手の位置（人差し指〜小指の4フレット分）
+  // 左手の位置（人差し指〜小指の4フレット分）。同じ位置にいる区間で表示する
   const st = ci >= 0 ? r.path[ci] : null;
-  if (st) {
-    const hx = xFret(st.hand - 1);
+  const block = phHandBlock(ci);
+  const nextBlock = block && block.to + 1 < r.events.length ? phHandBlock(block.to + 1) : null;
+  if (block) {
+    const hx = xFret(block.hand - 1);
+    const rest = block.to - ci;
     s += `<rect x="${hx}" y="${FB.top - 14}" width="${FB.fw * 4}" height="${FB.gap * 5 + 28}" rx="6" fill="rgba(126,200,163,0.13)" stroke="rgba(126,200,163,0.45)"/>`;
-    s += `<text x="${hx + 4}" y="${FB.top - 17}" class="ph-hand-label">左手 ${st.hand - capo}f〜</text>`;
+    s += `<text x="${hx + 4}" y="${FB.top - 17}" class="ph-hand-label">左手 ${block.hand - capo}f〜${rest ? `（このまま あと${rest}音）` : ''}</text>`;
+    // 次で移動するなら移動先を点線で
+    if (nextBlock && block.to === ci && nextBlock.hand !== block.hand) {
+      const nx = xFret(nextBlock.hand - 1);
+      s += `<rect x="${nx}" y="${FB.top - 14}" width="${FB.fw * 4}" height="${FB.gap * 5 + 28}" rx="6" fill="none" stroke="rgba(255,190,90,0.8)" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+      s += `<text x="${nx + 4}" y="${FB.top - 17}" class="ph-hand-next">次: ${nextBlock.hand - capo}f〜へ移動</text>`;
+    }
   }
   for (const f of [3, 5, 7, 9, 15, 17, 19, 21]) {
     s += `<circle cx="${FB.nut + (f - 0.5) * FB.fw}" cy="${FB.top + FB.gap * 2.5}" r="4" fill="#6b5640"/>`;
@@ -335,7 +373,22 @@ function renderPhBoard() {
     s += `<rect x="${xFret(capo) - 9}" y="${FB.top - 14}" width="8" height="${FB.gap * 5 + 28}" rx="3" fill="#8fa9d0"/>`;
     s += `<text x="${xFret(capo) - 5}" y="${FB.top - 17}" text-anchor="middle" class="capo-label">カポ</text>`;
   }
-  // 次のイベント（薄い枠）
+  // この位置で弾く音を薄く（今鳴らしている音だけ濃く）
+  if (block) {
+    const seen = new Set((st ? st.picks : []).filter(p => !p.drop).map(p => `${p.s}|${p.f}`));
+    for (let k = block.from; k <= block.to; k++) {
+      if (k === ci) continue;
+      const kst = r.path[k];
+      for (const p of kst.picks) {
+        if (p.drop || seen.has(`${p.s}|${p.f}`)) continue;
+        seen.add(`${p.s}|${p.f}`);
+        const finger = r.fingerOf(kst, p);
+        s += `<circle cx="${xNote(p.f)}" cy="${yOf(p.s)}" r="9" class="ph-dot-faint${finger === 0 ? ' open' : ''}"/>`;
+        s += `<text x="${xNote(p.f)}" y="${yOf(p.s) + 4}" text-anchor="middle" class="ph-dot-faint-label">${finger}</text>`;
+      }
+    }
+  }
+  // 次のイベント（点線の枠）
   if (ni >= 0 && r.path[ni]) {
     for (const p of r.path[ni].picks) {
       if (p.drop) continue;
@@ -383,8 +436,16 @@ function renderPhInfo(ci) {
     const approx = p.approx ? ` <span class="warn">≈近似（元の音 ${phNoteName(orig)}）</span>` : '';
     return `<b>${phNoteName(p.midi)}</b> ${6 - p.s}弦 ${p.f - r.capo}f・${fingerTxt}${approx}`;
   });
+  const block = phHandBlock(ci);
+  const nextBlock = block && block.to + 1 < r.events.length ? phHandBlock(block.to + 1) : null;
+  let hand = '';
+  if (block && block.to === ci && nextBlock && nextBlock.hand !== block.hand) {
+    hand = `<span class="ph-info-move">次の音で左手を ${block.hand - r.capo}f → ${nextBlock.hand - r.capo}f へ移動</span>`;
+  } else if (block && block.to > ci) {
+    hand = `<span class="ph-info-stay">左手そのまま（あと${block.to - ci}音）</span>`;
+  }
   box.innerHTML = `<span class="ph-info-pos">${bar}小節 ${Number.isInteger(beat) ? beat + '拍' : beat.toFixed(2) + '拍'}</span>` +
-    `<span class="ph-info-tech ${TECH_INFO[tech.tech].cls}-txt">${TECH_INFO[tech.tech].name}${dir}</span>` + parts.join('　/　');
+    `<span class="ph-info-tech ${TECH_INFO[tech.tech].cls}-txt">${TECH_INFO[tech.tech].name}${dir}</span>` + parts.join('　/　') + hand;
 }
 
 // ------------------------------------------------------------

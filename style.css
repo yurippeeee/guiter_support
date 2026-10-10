@@ -673,3 +673,12 @@ body[data-tab="phrase"] .transport { display: none; }
 .ph-ps-title { font-weight: 700; }
 .ph-ps-choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .ph-ps-done { color: #7bd3a8; }
+
+/* フレーズ→TAB: 左手の区間 */
+.ph-dot-faint { fill: rgba(240, 200, 120, 0.22); stroke: rgba(240, 200, 120, 0.55); stroke-width: 1; }
+.ph-dot-faint.open { fill: none; stroke: rgba(126, 200, 163, 0.55); }
+.ph-dot-faint-label { fill: rgba(255, 235, 200, 0.6); font-size: 10px; font-weight: 700; font-family: inherit; pointer-events: none; }
+.ph-hand-next { fill: #ffbe5a; font-size: 11px; font-weight: 700; font-family: inherit; }
+.ph-pos-mark { fill: var(--accent-2); font-size: 10px; font-weight: 700; font-family: inherit; }
+.ph-info-stay { margin-left: 12px; color: var(--accent-2); }
+.ph-info-move { margin-left: 12px; color: #ffbe5a; font-weight: 700; }
