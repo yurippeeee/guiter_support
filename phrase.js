@@ -373,6 +373,9 @@ function renderPhBoard() {
     s += `<rect x="${xFret(capo) - 9}" y="${FB.top - 14}" width="8" height="${FB.gap * 5 + 28}" rx="3" fill="#8fa9d0"/>`;
     s += `<text x="${xFret(capo) - 5}" y="${FB.top - 17}" text-anchor="middle" class="capo-label">カポ</text>`;
   }
+  // 印を付けた弦（1本の弦に印は1つだけ）
+  const marked = new Set();
+  if (st) for (const p of st.picks) if (!p.drop) marked.add(p.s);
   // 押さえたままにできる形を薄く（今鳴らしている音だけ濃く）
   // 左手が同じ位置にいる間で、前後の音のうち「同じ弦で別のフレットにならない」範囲だけ。
   // アルペジオなら押さえておく和音の形、単音の動きなら近くの音だけが出る
@@ -391,15 +394,16 @@ function renderPhBoard() {
     for (let k = ci + 1; k <= block.to && fits(k); k++) take(k);
     for (let k = ci - 1; k >= block.from && fits(k); k--) take(k);
     for (const { st: kst, p } of faint) {
+      marked.add(p.s);
       const finger = r.fingerOf(kst, p);
       s += `<circle cx="${xNote(p.f)}" cy="${yOf(p.s)}" r="9" class="ph-dot-faint${finger === 0 ? ' open' : ''}"/>`;
       s += `<text x="${xNote(p.f)}" y="${yOf(p.s) + 4}" text-anchor="middle" class="ph-dot-faint-label">${finger}</text>`;
     }
   }
-  // 次のイベント（点線の枠）
+  // 次のイベント（点線の枠）。1本の弦に印は1つだけ（同じ弦に複数の印があると同時に押さえるように見える）
   if (ni >= 0 && r.path[ni]) {
     for (const p of r.path[ni].picks) {
-      if (p.drop) continue;
+      if (p.drop || marked.has(p.s)) continue;
       s += `<circle cx="${xNote(p.f)}" cy="${yOf(p.s)}" r="10" fill="none" stroke="#9aa0ab" stroke-width="1.5" stroke-dasharray="3 3"/>`;
     }
   }
