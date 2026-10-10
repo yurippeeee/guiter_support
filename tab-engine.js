@@ -122,7 +122,7 @@ const TabEngine = (() => {
   }
 
   // 指の割り当て（人差し指=1〜小指=4）。押さえられなければ null
-  //   同じフレットの音は、1本の指でまとめる（隣り合う弦。離れた弦は一番低いフレットのセーハだけ）か、別々の指で押さえる
+  //   同じフレットの音は、人差し指でまとめる（セーハ）か、別々の指で押さえる。中指・薬指・小指は1本の弦だけ
   //   指はフレットが低い方から順に（同じフレットを別々の指なら6弦側から）。手の位置 hand のフレットが人差し指の基本
   //   セーハの間の弦で開放弦は鳴らせない
   function assignFingers(sounded, hand, capo) {
@@ -158,11 +158,8 @@ const TabEngine = (() => {
           }
           const fg = Math.max(prev + 1, natural);
           if (fg > REACH) { ok = false; break; }
-          // 離れた弦をまとめて押さえる（セーハ）のは人差し指だけ
-          if (items.length > 1 && fg !== 1) {
-            const ss = items.map(p => p.s);
-            if (Math.max(...ss) - Math.min(...ss) + 1 !== ss.length) { ok = false; break; }
-          }
+          // 複数の弦をまとめて押さえる（セーハ）のは人差し指だけ。中指・薬指・小指は1本の弦だけ
+          if (items.length > 1 && fg !== 1) { ok = false; break; }
           cost += (fg - natural) * W.fingerOff;
           for (const p of items) fm.set(p.note, fg);
           prev = fg;
