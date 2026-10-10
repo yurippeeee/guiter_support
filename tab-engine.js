@@ -43,6 +43,13 @@ const TabEngine = (() => {
     tapCross: 1.0,    // 別の弦へのタッピング
     capoBase: 1.5,    // カポを付ける手間（なるべくカポ無しを優先）
     capo: 0.3,        // カポ1フレットあたり
+    // チューニングを変える手間 = 種類ごとの基本（tier: なじみの薄いものほど大きい）＋弦ごとの量
+    tunePer: 0.2,     // 1弦1半音あたり
+    tuneUp: 0.8,      // 上げる（弦が張る）1半音あたりの上乗せ
+    tuneCustom: 10,   // 名前のない（一般的でない）チューニングの基本
+    tuneKeep: -2.0,   // 今のチューニングのまま（少しの差で入れ替わらないように）
+    tuneMargin: 0.08, // レギュラーから変えるのは、弾きやすさがこの割合以上よくなるときだけ
+    tuneShow: 12,     // 最良からこの差までの候補は最後まで計算する（候補として差を見せるため）
   };
 
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -234,15 +241,16 @@ const TabEngine = (() => {
       for (const h of handOptions(fretted, capo)) {
         const fa = assignFingers(sounded, h.hand, capo);
         if (!fa) continue;
-        states.push({ picks: a.picks, hand: h.hand, tap: false, openOnly: !fretted.length, fingers: fa.fingers, cost: a.cost + extra + h.cost + fa.cost });
+        states.push({ picks: a.picks, sounded, hand: h.hand, tap: false, openOnly: !fretted.length, fingers: fa.fingers, cost: a.cost + extra + h.cost + fa.cost });
       }
     }
     // タッピング候補（単音のみ）: 左手はそのまま、右手で遠いフレットを叩く
     if (!multi) {
       for (const o of optsPer[0]) {
         if (o.drop || o.approx || o.f <= capo) continue;
+        const picks = [{ ...o, note: 0 }];
         for (let h = Math.max(capo + 1, o.f - 12); h <= o.f - 5; h++) {
-          states.push({ picks: [{ ...o, note: 0 }], hand: h, tap: true, cost: W.tap });
+          states.push({ picks, sounded: picks, hand: h, tap: true, cost: W.tap });
         }
       }
     }
@@ -250,7 +258,7 @@ const TabEngine = (() => {
     return states.slice(0, MAX_STATES);
   }
 
-  const soundedOf = st => st.picks.filter(p => !p.drop);
+  const soundedOf = st => st.sounded || st.picks.filter(p => !p.drop);
 
   // 状態間の移動コスト
   // free: 前の音が休符で終わっている・開放弦だけ、など左手が空いている間に動ける
@@ -285,29 +293,92 @@ const TabEngine = (() => {
     return capo ? W.capoBase + capo * W.capo : 0;
   }
 
-  function solveWithCapo(events, open, capo, stepSec) {
+  // bound: これより悪くなることが確定したら打ち切る（チューニング探索の高速化）
+  function solveWithCapo(events, open, capo, stepSec, bound = Infinity) {
     if (!events.length) return { capo, cost: capoCost(capo), path: [] };
-    const layers = events.map(ev => eventStates(ev, open, capo));
+    // 同じ音の組み合わせ（くり返す和音など）の候補は使い回す
+    const memo = new Map();
+    const layers = events.map(ev => {
+      const key = ev.notes.map(n => n.midi).join(',');
+      if (!memo.has(key)) memo.set(key, eventStates(ev, open, capo));
+      return memo.get(key);
+    });
     let dp = layers[0].map(s => s.cost);
     const back = [layers[0].map(() => -1)];
     for (let i = 1; i < events.length; i++) {
       const dtSec = (events[i].t - events[i - 1].t) * stepSec;
       const free = events[i - 1].t + events[i - 1].dur < events[i].t; // 前の音のあとに休符がある
-      const nd = [];
-      const nb = [];
-      for (const cur of layers[i]) {
+      const prevLayer = layers[i - 1];
+      const curLayer = layers[i];
+      const nd = new Array(curLayer.length);
+      const nb = new Array(curLayer.length);
+      // 高速化：単音→単音以外の移動コストは「手の位置」と「開放弦だけか」だけで決まるので、
+      // 前の候補をその組ごとにまとめ（一番小さい dp と、その最初の番号）、まとめて比べる。結果は全部比べた場合と同じ
+      const groups = new Map(); // key → { rep, dp, j }（単音以外の候補）
+      const singleGroups = new Map(); // 単音の候補（今が和音のとき用）
+      const singles = []; // 単音の候補（今も単音のときは1つずつ比べる）
+      for (let j = 0; j < prevLayer.length; j++) {
+        if (dp[j] === Infinity) continue;
+        const pv = prevLayer[j];
+        const isSingle = soundedOf(pv).length === 1;
+        const key = pv.hand * 2 + (pv.openOnly ? 1 : 0);
+        const g = isSingle ? singleGroups : groups;
+        const cur = g.get(key);
+        if (!cur || dp[j] < cur.dp) g.set(key, { rep: pv, dp: dp[j], j });
+        if (isSingle) singles.push(j);
+      }
+      // 単音→単音以外の部分は今の候補の手の位置だけで決まるので、手の位置ごとに1回だけ計算する
+      const groupList = [...groups.values()];
+      const allGroupList = groupList.concat([...singleGroups.values()]);
+      const cacheMulti = new Map();
+      const cacheBase = new Map();
+      const bestOver = (list, cur) => {
+        let b = Infinity;
+        let a = -1;
+        for (let k = 0; k < list.length; k++) {
+          const g = list[k];
+          const v = g.dp + transition(g.rep, cur, dtSec, free);
+          if (v < b || (v === b && g.j < a)) { b = v; a = g.j; }
+        }
+        return { b, a };
+      };
+      for (let c = 0; c < curLayer.length; c++) {
+        const cur = curLayer[c];
         let best = Infinity;
         let arg = -1;
-        layers[i - 1].forEach((prev, j) => {
-          if (dp[j] === Infinity) return;
-          const v = dp[j] + transition(prev, cur, dtSec, free);
-          if (v < best) { best = v; arg = j; }
-        });
-        nd.push(best + cur.cost);
-        nb.push(arg);
+        if (cur.tap) {
+          for (let j = 0; j < prevLayer.length; j++) {
+            if (dp[j] === Infinity) continue;
+            const v = dp[j] + transition(prevLayer[j], cur, dtSec, free);
+            if (v < best || (v === best && j < arg)) { best = v; arg = j; }
+          }
+        } else if (soundedOf(cur).length === 1) {
+          let r = cacheBase.get(cur.hand);
+          if (!r) cacheBase.set(cur.hand, (r = bestOver(groupList, cur)));
+          best = r.b;
+          arg = r.a;
+          for (let k = 0; k < singles.length; k++) {
+            const j = singles[k];
+            const v = dp[j] + transition(prevLayer[j], cur, dtSec, free);
+            if (v < best || (v === best && j < arg)) { best = v; arg = j; }
+          }
+        } else {
+          let r = cacheMulti.get(cur.hand);
+          if (!r) cacheMulti.set(cur.hand, (r = bestOver(allGroupList, cur)));
+          best = r.b;
+          arg = r.a;
+        }
+        nd[c] = best + cur.cost;
+        nb[c] = arg;
       }
       dp = nd;
       back.push(nb);
+      if (bound < Infinity) {
+        // 残りのイベントで下がりうるのはレガートの優遇だけ
+        let m = Infinity;
+        for (const v of nd) if (v < m) m = v;
+        if (m + capoCost(capo) + W.legato * (events.length - 1 - i) > bound) return { capo, cost: Infinity, path: null };
+      }
     }
     let bi = -1;
     let bc = Infinity;
@@ -384,7 +455,128 @@ const TabEngine = (() => {
     };
   }
 
-  return { solve, MAX_FRET, CAPO_MAX };
+  // ------------------------------------------------------------
+  // チューニング（弦ごと）
+  // off: 6弦→1弦の、レギュラー（E A D G B E）からの半音差
+  // ------------------------------------------------------------
+  const STANDARD = [40, 45, 50, 55, 59, 64];
+  const TUNE_MIN = [-4, -4, -4, -4, -4, -4];
+  const TUNE_MAX = [2, 2, 2, 2, 2, 1]; // 上げすぎると弦が切れる（1弦は半音まで）
+  const TUNING_PRESETS = [
+    { name: 'レギュラー', off: [0, 0, 0, 0, 0, 0], tier: 0 },
+    { name: 'ドロップD', off: [-2, 0, 0, 0, 0, 0], tier: 3 },
+    { name: '半音下げ', off: [-1, -1, -1, -1, -1, -1], tier: 4 },
+    { name: '全音下げ', off: [-2, -2, -2, -2, -2, -2], tier: 5 },
+    { name: '1音半下げ', off: [-3, -3, -3, -3, -3, -3], tier: 6 },
+    { name: 'ダブルドロップD', off: [-2, 0, 0, 0, 0, -2], tier: 6 },
+    { name: 'ドロップC#', off: [-3, -1, -1, -1, -1, -1], tier: 6 },
+    { name: 'ドロップC', off: [-4, -2, -2, -2, -2, -2], tier: 6 },
+    { name: 'DADGAD', off: [-2, 0, 0, 0, -2, -2], tier: 6 },
+    { name: 'オープンD', off: [-2, 0, 0, -1, -2, -2], tier: 6 },
+    { name: 'オープンDm', off: [-2, 0, 0, -2, -2, -2], tier: 6 },
+    { name: 'オープンG', off: [-2, -2, 0, 0, 0, -2], tier: 6 },
+    { name: 'オープンC', off: [-4, -2, -2, 0, 1, 0], tier: 8 },
+    { name: 'オープンE', off: [0, 2, 2, 1, 0, 0], tier: 8 },
+    { name: 'オープンA', off: [0, 0, 2, 2, 2, 0], tier: 8 },
+    { name: '4度チューニング', off: [0, 0, 0, 0, 1, 1], tier: 9 },
+  ];
+  const sameOff = (a, b) => a.every((x, i) => x === b[i]);
+  const presetOf = off => TUNING_PRESETS.find(p => sameOff(p.off, off)) || null;
+  const tuningOpen = off => STANDARD.map((m, i) => m + off[i]);
+  const validOff = off => Array.isArray(off) && off.length === 6 && off.every((x, i) => Number.isInteger(x) && x >= TUNE_MIN[i] && x <= TUNE_MAX[i]);
+
+  // チューニングを変える手間（弾きやすさのコストと同じ単位）
+  function tuningCost(off) {
+    if (off.every(x => x === 0)) return 0;
+    const p = presetOf(off);
+    let c = p ? p.tier : W.tuneCustom;
+    for (const x of off) c += Math.abs(x) * W.tunePer + Math.max(0, x) * W.tuneUp;
+    return c;
+  }
+
+  // 最適なチューニングを探す（少しずつ計算して進み具合を返すジェネレーター。最後に結果を return）
+  // opts: solve と同じ（open は使わない）＋ prefer: 今のチューニング（少し優先して、わずかな差では変えない）
+  // 1. よく使うチューニングを全部試す（カポも含めて）
+  // 2. 一番よいものから、1本ずつ弦を ±1〜2 半音動かして良くなれば採用（名前のないチューニングも見つける）
+  function* searchTuning(notes, opts) {
+    REACH = opts.reach === 3 ? 3 : 4;
+    const events = groupEvents(notes);
+    const capos = opts.capo === 'auto' ? [...Array(CAPO_MAX + 1).keys()] : [opts.capo];
+    const prefer = validOff(opts.prefer) ? opts.prefer : null;
+    const seen = new Map(); // チューニング＋カポの範囲 → 評価
+    let margin = 0;
+    let bestTotal = Infinity;
+    const total = TUNING_PRESETS.length * capos.length + 2 * 18;
+    let done = 0;
+    // 1つのチューニングを評価（カポごとに解いて一番よいもの）。1回解くごとに進み具合を返す
+    function* evaluate(off, cs) {
+      const k = off.join(',') + '|' + cs.join(',');
+      if (seen.has(k)) return seen.get(k);
+      const tune = tuningCost(off);
+      const extra = tune + (prefer && sameOff(prefer, off) ? W.tuneKeep : 0) + (off.some(x => x) ? margin : 0);
+      let best = null;
+      for (const c of cs) {
+        // すでに見つかっている最良より確実に悪くなる途中で打ち切る
+        const r = solveWithCapo(events, tuningOpen(off), c, opts.stepSec, bestTotal + W.tuneShow - extra);
+        if (!best || r.cost < best.cost) best = r;
+        yield { done: Math.min(total - 1, ++done), total };
+      }
+      const res = { off: off.slice(), capo: best.capo, play: best.cost, tune, cost: best.cost + extra, full: cs.length === capos.length };
+      seen.set(k, res);
+      if (res.full && res.cost < bestTotal) bestTotal = res.cost;
+      return res;
+    }
+    const all = () => [...seen.values()].filter(r => r.full && Number.isFinite(r.cost));
+    // 1. よく使うチューニング（最初にレギュラーを解いて、変える価値の基準 margin を決める）
+    for (const p of TUNING_PRESETS) {
+      const r = yield* evaluate(p.off, capos);
+      if (p.tier === 0 && Number.isFinite(r.play)) margin = W.tuneMargin * r.play;
+    }
+    if (prefer && !presetOf(prefer)) yield* evaluate(prefer, capos);
+    // 2. 一番よいものから、弦を1本ずつ下げる（-1・-2）／半音上げる。元の形から動かす弦は2本まで
+    let cur = all().reduce((a, b) => (b.cost < a.cost ? b : a));
+    const base = cur.off.slice();
+    for (let iter = 0; iter < 2 && events.length; iter++) {
+      let bestN = null;
+      for (let st = 0; st < 6; st++) {
+        for (const d of [-2, -1, 1]) {
+          const off = cur.off.slice();
+          off[st] += d;
+          if (off[st] < TUNE_MIN[st] || off[st] > TUNE_MAX[st]) continue;
+          if (off[st] - base[st] > 1 || off[st] - base[st] < -2) continue;
+          if (off.filter((x, i) => x !== base[i]).length > 2) continue;
+          const r = yield* evaluate(off, [cur.capo]);
+          if (Number.isFinite(r.cost) && (!bestN || r.cost < bestN.cost)) bestN = r;
+        }
+      }
+      if (!bestN || bestN.cost >= cur.cost) break;
+      const full = yield* evaluate(bestN.off, capos);
+      if (!(full.cost < cur.cost)) break;
+      cur = full;
+    }
+    const ranked = all().sort((a, b) => a.cost - b.cost);
+    return {
+      off: ranked[0].off,
+      capo: ranked[0].capo,
+      candidates: ranked.map(r => ({ off: r.off, name: tuningName(r.off), capo: r.capo, cost: r.cost, play: r.play, tune: r.tune })),
+    };
+  }
+
+  // 全部まとめて計算する（テスト・Node 用）
+  function bestTuning(notes, opts) {
+    const it = searchTuning(notes, opts);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  }
+
+  const tuningName = off => (presetOf(off) || { name: 'カスタム' }).name;
+
+  return {
+    solve, MAX_FRET, CAPO_MAX,
+    STANDARD, TUNING_PRESETS, TUNE_MIN, TUNE_MAX,
+    presetOf, tuningName, tuningOpen, tuningCost, validOff, searchTuning, bestTuning,
+  };
 })();
 
 if (typeof module !== 'undefined') module.exports = TabEngine;

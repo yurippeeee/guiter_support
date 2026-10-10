@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ギターコード サポート</title>
-  <link rel="stylesheet" href="style.css?v=24">
+  <link rel="stylesheet" href="style.css?v=25">
 </head>
 <body>
   <header class="topbar">
@@ -186,7 +186,7 @@
     <div class="pane" data-pane="phrase">
       <section class="card">
         <div class="card-head">
-          <h2>フレーズ→TAB（自動運指） <small class="ph-ver">v24</small></h2>
+          <h2>フレーズ→TAB（自動運指） <small class="ph-ver">v25</small></h2>
           <div class="card-tools">
             <button id="ph-ps-btn" class="play-btn subtle">📥 Phrase Swipe から</button>
             <input type="file" id="ph-ps-file" accept=".json,application/json" hidden>
@@ -212,6 +212,8 @@
           <label>手の大きさ <select id="ph-reach"></select></label>
           <span id="ph-summary" class="ph-summary"></span>
         </div>
+        <div id="ph-strings" class="ph-strings" aria-label="弦ごとのチューニング"></div>
+        <div id="ph-tune-cands" class="ph-capo-cands"></div>
         <div id="ph-capo-cands" class="ph-capo-cands"></div>
       </section>
 
@@ -252,6 +254,8 @@
             <li>▶で指板の押さえる位置が流れて音も鳴ります。シークバー・前後ボタン・TAB欄のクリックで好きな位置を確認できます</li>
             <li>ギターで出せない音はオクターブをずらした近似音（≈）、押さえきれない和音の音は省略して表示します</li>
             <li>TABの数字はカポからの相対フレットです</li>
+            <li>チューニングは弦ごとに −／＋ で半音ずつ変えられます（ドロップD・DADGAD・オープンG などは一覧から）。TAB・指板の弦の横にその弦の音名が出ます</li>
+            <li>チューニングを「自動（最適化）」にすると、よく使うチューニングと、そこから弦を1〜2本変えたものを試して一番弾きやすいものを選びます。チューニングを変える手間も含めて比べるので、差が小さいときはレギュラーのままです。候補をクリックするとそのチューニングに固定します</li>
           </ul>
         </details>
       </section>
@@ -278,9 +282,9 @@
     </div>
   </main>
 
-  <script src="chords.js?v=24"></script>
-  <script src="tab-engine.js?v=24"></script>
-  <script src="app.js?v=24"></script>
-  <script src="phrase.js?v=24"></script>
+  <script src="chords.js?v=25"></script>
+  <script src="tab-engine.js?v=25"></script>
+  <script src="app.js?v=25"></script>
+  <script src="phrase.js?v=25"></script>
 </body>
 </html>

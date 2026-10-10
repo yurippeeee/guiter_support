@@ -4,6 +4,7 @@
 // フレーズ→TAB（独立機能）
 // ピアノロールで入力したフレーズに、TabEngine が押さえる位置・指・奏法・カポを割り当てる。
 // キー・チューニング・カポ・テンポはこの機能だけのもの（他タブの設定とは連動しない）
+// チューニングは弦ごとに変えられる（レギュラーからの半音差）。「自動」は弾きやすさから最適なチューニングを探す
 // 依存: chords.js（KEY_NAMES, OPEN_MIDI, TUNINGS）/ app.js（el, audio, pluck）/ tab-engine.js
 // ============================================================
 const PH_KEY = 'guitar-support-phrase';
@@ -12,7 +13,7 @@ const PH_STEPS_PER_BAR = 16;             // 16分音符グリッド
 const PH_MAJOR = [0, 2, 4, 5, 7, 9, 11]; // 白鍵＝キーのメジャースケール
 const PR = { left: 58, cw: 16, rh: 13 }; // ピアノロール
 const TB = { top: 30, gap: 15 };          // TAB譜
-const FB = { nut: 62, fw: 38, top: 26, gap: 24, frets: 22 }; // 指板
+const FB = { nut: 74, fw: 38, top: 26, gap: 24, frets: 22 }; // 指板
 
 const TECH_INFO = {
   pick:      { cls: 't-pick',   mark: '',   name: 'ピッキング' },
@@ -24,14 +25,23 @@ const TECH_INFO = {
   chord:     { cls: 't-chord',  mark: '',   name: '和音（ダウンストローク）' },
 };
 
+// 保存されていたチューニング → 'auto' か 6弦→1弦の半音差の配列（以前は全弦一律の番号）
+function phTuningFrom(v) {
+  if (v === 'auto') return 'auto';
+  if (TabEngine.validOff(v)) return v.slice();
+  if (Number.isInteger(v) && TUNINGS[v]) return Array(6).fill(TUNINGS[v].offset);
+  return [0, 0, 0, 0, 0, 0];
+}
+
 function loadPhrase() {
-  const def = { key: 0, tuning: 0, bpm: 100, bars: 4, capo: 'auto', reach: 4, loop: false, notes: [] };
+  const def = { key: 0, tuning: [0, 0, 0, 0, 0, 0], autoTuning: null, bpm: 100, bars: 4, capo: 'auto', reach: 4, loop: false, notes: [] };
   try {
     const s = JSON.parse(localStorage.getItem(PH_KEY));
     if (!s || typeof s !== 'object') return def;
     return {
       key: Number.isInteger(s.key) && s.key >= 0 && s.key < 12 ? s.key : 0,
-      tuning: TUNINGS[s.tuning] ? s.tuning : 0,
+      tuning: phTuningFrom(s.tuning),
+      autoTuning: TabEngine.validOff(s.autoTuning) ? s.autoTuning : null,
       bpm: typeof s.bpm === 'number' ? Math.min(240, Math.max(40, s.bpm)) : 100,
       bars: [1, 2, 4, 8, 16].includes(s.bars) ? s.bars : 4,
       capo: s.capo === 'auto' || (Number.isInteger(s.capo) && s.capo >= 0 && s.capo <= TabEngine.CAPO_MAX) ? s.capo : 'auto',
@@ -66,6 +76,17 @@ const phMidi = r => phLow() + r;
 const phStepSec = () => 60 / ph.bpm / 4;
 const phNoteName = m => `${KEY_NAMES[((m % 12) + 12) % 12]}${Math.floor(m / 12) - 1}`;
 const phCapoLabel = c => (c === 0 ? 'なし' : `${c}フレット`);
+// 今使うチューニング（自動なら最後に見つけたもの）
+const phTuning = () => (ph.tuning === 'auto' ? ph.autoTuning || [0, 0, 0, 0, 0, 0] : ph.tuning);
+const phOpen = () => TabEngine.tuningOpen(phTuning());
+const phOpenName = s => KEY_NAMES[((phOpen()[s] % 12) + 12) % 12];
+const phTuningText = off => {
+  const names = TabEngine.tuningOpen(off).map(m => KEY_NAMES[m % 12]).join(' ');
+  return `${TabEngine.tuningName(off)}（${names}）`;
+};
+let phTuneSearch = null; // 自動チューニングの探索 { gen, progress, cands }
+let phTuneGen = 0;
+let phTuneTimer = null;
 
 // ------------------------------------------------------------
 // 最適化
@@ -75,9 +96,8 @@ function solvePhrase() {
   const notes = ph.notes.filter(n => n.t < steps).map(n => ({
     t: n.t, dur: Math.min(n.dur, steps - n.t), midi: phMidi(n.r), ref: n,
   }));
-  const offset = TUNINGS[ph.tuning].offset;
   phResult = TabEngine.solve(notes, {
-    open: OPEN_MIDI.map(m => m + offset),
+    open: phOpen(),
     stepSec: phStepSec(),
     capo: ph.capo,
     reach: ph.reach,
@@ -122,7 +142,10 @@ function phEventAt(c) {
 // ------------------------------------------------------------
 function renderPhSummary() {
   const r = phResult;
-  const parts = [`カポ: <b>${phCapoLabel(r.capo)}</b>${ph.capo === 'auto' ? '（自動で最適化）' : ''}`];
+  const parts = [
+    `チューニング: <b>${phTuningText(phTuning())}</b>${ph.tuning === 'auto' ? '（自動で最適化）' : ''}`,
+    `カポ: <b>${phCapoLabel(r.capo)}</b>${ph.capo === 'auto' ? '（自動で最適化）' : ''}`,
+  ];
   const count = {};
   r.techs.forEach(t => { count[t.tech] = (count[t.tech] || 0) + 1; });
   const techText = ['hammer', 'pull', 'slideUp', 'slideDown', 'tap', 'chord']
@@ -155,6 +178,108 @@ function renderPhSummary() {
 }
 
 // ------------------------------------------------------------
+// チューニング：弦ごとの調整と、自動のときの探索・候補
+// ------------------------------------------------------------
+function renderPhTuning() {
+  const off = phTuning();
+  const sel = el('ph-tuning');
+  const preset = TabEngine.presetOf(off);
+  sel.querySelector('option[value="custom"]').hidden = ph.tuning === 'auto' || !!preset;
+  sel.value = ph.tuning === 'auto' ? 'auto' : preset ? `p${TabEngine.TUNING_PRESETS.indexOf(preset)}` : 'custom';
+  const box = el('ph-strings');
+  box.innerHTML = '';
+  for (let st = 0; st < 6; st++) {
+    const m = TabEngine.tuningOpen(off)[st];
+    const d = off[st];
+    const cell = document.createElement('div');
+    cell.className = 'ph-string' + (d ? ' changed' : '');
+    cell.innerHTML = `<span class="ph-sname">${6 - st}弦</span>` +
+      `<button class="ph-tune-btn" data-d="-1" aria-label="${6 - st}弦を半音下げる"${d <= TabEngine.TUNE_MIN[st] ? ' disabled' : ''}>−</button>` +
+      `<b>${phNoteName(m)}</b>` +
+      `<button class="ph-tune-btn" data-d="1" aria-label="${6 - st}弦を半音上げる"${d >= TabEngine.TUNE_MAX[st] ? ' disabled' : ''}>＋</button>` +
+      `<span class="ph-sdiff">${d ? (d > 0 ? '+' : '') + d : ''}</span>`;
+    cell.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      // 自動で選ばれているチューニングから手で変えたら、そこから固定に切り替える
+      const next = phTuning().slice();
+      next[st] += Number(b.dataset.d);
+      if (next[st] < TabEngine.TUNE_MIN[st] || next[st] > TabEngine.TUNE_MAX[st]) return;
+      ph.tuning = next;
+      phChanged();
+    }));
+    box.appendChild(cell);
+  }
+  renderPhTuneCands();
+}
+
+function renderPhTuneCands() {
+  const box = el('ph-tune-cands');
+  box.innerHTML = '';
+  if (ph.tuning !== 'auto') return;
+  const t = phTuneSearch;
+  if (!t || !t.cands) {
+    box.innerHTML = `<span class="hint">最適なチューニングを探しています…${t ? ` ${Math.round(t.progress * 100)}%` : ''}</span>`;
+    return;
+  }
+  const label = document.createElement('span');
+  label.className = 'hint';
+  label.textContent = 'チューニング候補（チューニングを変える手間も含めて、数字が小さいほど弾きやすい / クリックで固定）:';
+  box.appendChild(label);
+  const best = t.cands[0].cost;
+  for (const c of t.cands.slice(0, 6)) {
+    const b = document.createElement('button');
+    b.className = 'ph-cand' + (c === t.cands[0] ? ' best' : '');
+    b.textContent = `${c.name}${TabEngine.presetOf(c.off) ? '' : `（${TabEngine.tuningOpen(c.off).map(m => KEY_NAMES[m % 12]).join('')}）`} ${c === t.cands[0] ? '最適' : '+' + (c.cost - best).toFixed(1)}`;
+    b.title = TabEngine.tuningOpen(c.off).map(m => KEY_NAMES[m % 12]).join(' ') + `・カポ ${phCapoLabel(c.capo)}`;
+    b.addEventListener('click', () => {
+      ph.tuning = c.off.slice();
+      phChanged();
+    });
+    box.appendChild(b);
+  }
+}
+
+// 自動のとき：入力が変わるたびに（少し待ってから）最適なチューニングを探し直す。
+// 少しずつ計算して画面を止めない。見つかったら、そのチューニングで解き直す
+function phScheduleTuneSearch() {
+  clearTimeout(phTuneTimer);
+  const gen = ++phTuneGen;
+  if (ph.tuning !== 'auto') {
+    phTuneSearch = null;
+    return;
+  }
+  phTuneSearch = { gen, progress: 0, cands: null };
+  renderPhTuneCands();
+  phTuneTimer = setTimeout(() => {
+    const steps = phSteps();
+    const notes = ph.notes.filter(n => n.t < steps).map(n => ({ t: n.t, dur: Math.min(n.dur, steps - n.t), midi: phMidi(n.r) }));
+    const it = TabEngine.searchTuning(notes, { stepSec: phStepSec(), capo: ph.capo, reach: ph.reach, prefer: ph.autoTuning || [0, 0, 0, 0, 0, 0] });
+    const tick = () => {
+      if (gen !== phTuneGen) return; // 入力が変わった：やり直しは新しい探索に任せる
+      const t0 = performance.now();
+      let r = it.next();
+      while (!r.done && performance.now() - t0 < 14) r = it.next();
+      if (!r.done) {
+        phTuneSearch.progress = r.value.done / r.value.total;
+        renderPhTuneCands();
+        setTimeout(tick, 0);
+        return;
+      }
+      phTuneSearch.cands = r.value.candidates;
+      const prev = phTuning();
+      ph.autoTuning = r.value.off;
+      if (prev.some((x, i) => x !== r.value.off[i])) {
+        savePhrase();
+        solvePhrase();
+        renderPhrase();
+      } else {
+        renderPhTuneCands();
+      }
+    };
+    tick();
+  }, 300);
+}
+
+// ------------------------------------------------------------
 // 描画: TAB譜（ピアノロールと横軸を共有）
 // ------------------------------------------------------------
 function renderPhTab() {
@@ -169,7 +294,7 @@ function renderPhTab() {
   s += `<text x="8" y="${TB.top + TB.gap * 2.5 + 4}" class="ph-tab-label">TAB</text>`;
   for (let i = 0; i < 6; i++) {
     s += `<line x1="${PR.left}" y1="${yOf(i)}" x2="${xOf(steps)}" y2="${yOf(i)}" stroke="#4a5263" stroke-width="1"/>`;
-    s += `<text x="${PR.left - 6}" y="${yOf(i) + 3.5}" text-anchor="end" class="ph-str-label">${6 - i}</text>`;
+    s += `<text x="${PR.left - 6}" y="${yOf(i) + 3.5}" text-anchor="end" class="ph-str-label">${6 - i}<tspan class="ph-open-name${phTuning()[i] ? ' changed' : ''}" dx="3">${phOpenName(i)}</tspan></text>`;
   }
   for (let b = 0; b <= ph.bars; b++) {
     const x = xOf(b * PH_STEPS_PER_BAR);
@@ -369,7 +494,7 @@ function renderPhBoard() {
   }
   for (let i = 0; i < 6; i++) {
     s += `<line x1="${FB.nut}" y1="${yOf(i)}" x2="${W - 14}" y2="${yOf(i)}" stroke="#cfc7b0" stroke-width="${0.8 + (5 - i) * 0.28}"/>`;
-    s += `<text x="4" y="${yOf(i) + 4}" class="ph-str-label">${6 - i}弦</text>`;
+    s += `<text x="4" y="${yOf(i) + 4}" class="ph-str-label">${6 - i}弦<tspan class="ph-open-name${phTuning()[i] ? ' changed' : ''}" dx="3">${phOpenName(i)}</tspan></text>`;
   }
   if (capo) {
     s += `<rect x="${xFret(capo) - 9}" y="${FB.top - 14}" width="8" height="${FB.gap * 5 + 28}" rx="3" fill="#8fa9d0"/>`;
@@ -628,9 +753,11 @@ function phChanged() {
   savePhrase();
   solvePhrase();
   renderPhrase();
+  phScheduleTuneSearch();
 }
 
 function renderPhrase() {
+  renderPhTuning();
   renderPhSummary();
   renderPhTab();
   renderPhRoll();
@@ -647,9 +774,16 @@ document.addEventListener('DOMContentLoaded', () => {
   keySel.addEventListener('change', () => { ph.key = Number(keySel.value); phChanged(); });
 
   const tunSel = el('ph-tuning');
-  TUNINGS.forEach((t, i) => tunSel.add(new Option(t.label, i)));
-  tunSel.value = ph.tuning;
-  tunSel.addEventListener('change', () => { ph.tuning = Number(tunSel.value); phChanged(); });
+  tunSel.add(new Option('自動（最適化）', 'auto'));
+  TabEngine.TUNING_PRESETS.forEach((t, i) => tunSel.add(new Option(`${t.name}（${TabEngine.tuningOpen(t.off).map(m => KEY_NAMES[m % 12]).join(' ')}）`, `p${i}`)));
+  tunSel.add(new Option('カスタム（弦ごとに設定）', 'custom'));
+  tunSel.addEventListener('change', () => {
+    const v = tunSel.value;
+    if (v === 'auto') ph.tuning = 'auto';
+    else if (v.startsWith('p')) ph.tuning = TabEngine.TUNING_PRESETS[Number(v.slice(1))].off.slice();
+    else return;
+    phChanged();
+  });
 
   const bpm = el('ph-bpm');
   bpm.value = ph.bpm;
@@ -718,4 +852,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
   solvePhrase();
   renderPhrase();
+  phScheduleTuneSearch();
 });
