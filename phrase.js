@@ -373,19 +373,27 @@ function renderPhBoard() {
     s += `<rect x="${xFret(capo) - 9}" y="${FB.top - 14}" width="8" height="${FB.gap * 5 + 28}" rx="3" fill="#8fa9d0"/>`;
     s += `<text x="${xFret(capo) - 5}" y="${FB.top - 17}" text-anchor="middle" class="capo-label">カポ</text>`;
   }
-  // この位置で弾く音を薄く（今鳴らしている音だけ濃く）
-  if (block) {
-    const seen = new Set((st ? st.picks : []).filter(p => !p.drop).map(p => `${p.s}|${p.f}`));
-    for (let k = block.from; k <= block.to; k++) {
-      if (k === ci) continue;
-      const kst = r.path[k];
-      for (const p of kst.picks) {
-        if (p.drop || seen.has(`${p.s}|${p.f}`)) continue;
-        seen.add(`${p.s}|${p.f}`);
-        const finger = r.fingerOf(kst, p);
-        s += `<circle cx="${xNote(p.f)}" cy="${yOf(p.s)}" r="9" class="ph-dot-faint${finger === 0 ? ' open' : ''}"/>`;
-        s += `<text x="${xNote(p.f)}" y="${yOf(p.s) + 4}" text-anchor="middle" class="ph-dot-faint-label">${finger}</text>`;
+  // 押さえたままにできる形を薄く（今鳴らしている音だけ濃く）
+  // 左手が同じ位置にいる間で、前後の音のうち「同じ弦で別のフレットにならない」範囲だけ。
+  // アルペジオなら押さえておく和音の形、単音の動きなら近くの音だけが出る
+  if (block && st) {
+    const fretOn = new Map(); // 弦 → フレット
+    for (const p of st.picks) if (!p.drop) fretOn.set(p.s, p.f);
+    const faint = [];
+    const fits = k => r.path[k].picks.every(p => p.drop || !fretOn.has(p.s) || fretOn.get(p.s) === p.f);
+    const take = k => {
+      for (const p of r.path[k].picks) {
+        if (p.drop || fretOn.has(p.s)) continue;
+        fretOn.set(p.s, p.f);
+        faint.push({ st: r.path[k], p });
       }
+    };
+    for (let k = ci + 1; k <= block.to && fits(k); k++) take(k);
+    for (let k = ci - 1; k >= block.from && fits(k); k--) take(k);
+    for (const { st: kst, p } of faint) {
+      const finger = r.fingerOf(kst, p);
+      s += `<circle cx="${xNote(p.f)}" cy="${yOf(p.s)}" r="9" class="ph-dot-faint${finger === 0 ? ' open' : ''}"/>`;
+      s += `<text x="${xNote(p.f)}" y="${yOf(p.s) + 4}" text-anchor="middle" class="ph-dot-faint-label">${finger}</text>`;
     }
   }
   // 次のイベント（点線の枠）

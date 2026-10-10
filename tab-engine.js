@@ -29,13 +29,14 @@ const TabEngine = (() => {
     stretch: 1.2,     // 4フレットを超える指の開き
     barre: 1.0,       // セーハ
     stringSkip: 0.4,  // 和音で間の弦をミュート
-    handHeight: 0.02, // ハイポジションほど少し不利
+    handHeight: 0.03, // ハイポジションほど少し不利
+    highFret: 0.25,   // 12フレットより上を押さえる（1フレットあたり。ネックの付け根は押さえにくい）
     shiftBase: 2.5,   // ポジション移動の基本コスト（手が動くこと自体が弾きにくい）
     shiftPer: 0.6,    // 1フレット移動あたり
     shiftFree: 0.6,   // 休符や開放弦の間に動ける移動は少し楽（倍率）
     crossing: 0.12,   // 単音の弦移動
     legato: -0.3,     // 速い同弦フレーズ（レガート可能）への優遇
-    tap: 2.5,         // タッピング
+    tap: 40,          // タッピング（ほかに弾き方がないときだけ使う）
     tapSlow: 3,       // ゆっくりな箇所でのタッピング
     tapCross: 1.0,    // 別の弦へのタッピング
     capoBase: 1.5,    // カポを付ける手間（なるべくカポ無しを優先）
@@ -121,7 +122,11 @@ const TabEngine = (() => {
         else if (f === h - 1 && !distinct.includes(h)) { low = true; c += W.stretch; }
         else { ok = false; break; }
       }
-      if (ok && !(low && high)) out.push({ hand: h, cost: c + W.handHeight * h });
+      if (ok && !(low && high)) {
+        // 押さえにくさは指板上の実際の位置で決まる（カポを付けても同じ）
+        const high12 = distinct.reduce((a, f) => a + Math.max(0, f - 12), 0);
+        out.push({ hand: h, cost: c + W.handHeight * h + W.highFret * high12 });
+      }
     }
     return out;
   }
