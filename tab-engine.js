@@ -86,6 +86,10 @@ const TabEngine = (() => {
   }
 
   // 押さえるフレット群に対する左手位置（人差し指のフレット）の候補とコスト
+  // 指は1フレット1本（人差し指=h 〜 小指=h+3）。はみ出しは片側1フレットまで:
+  //   h+4 は小指を伸ばす（h+3 に押さえる音がないときだけ）
+  //   h-1 は人差し指を戻す（h に押さえる音がないときだけ）
+  // 和音で同じ指が別のフレットを押さえる・両側にはみ出す、といった人の手で無理な形は候補にしない
   function handOptions(frets, capo) {
     const lo = capo + 1;
     const hi = MAX_FRET - 3;
@@ -95,9 +99,10 @@ const TabEngine = (() => {
       for (let h = lo; h <= Math.min(hi, capo + 12); h++) out.push({ hand: h, cost: 0 });
       return out;
     }
-    const minF = Math.min(...frets);
-    const maxF = Math.max(...frets);
-    if (maxF - minF > 5) return [];
+    const distinct = [...new Set(frets)];
+    const minF = Math.min(...distinct);
+    const maxF = Math.max(...distinct);
+    if (maxF - minF > 4 || distinct.length > 4) return [];
     let base = 0;
     if (frets.length > 4) {
       // 5音以上はセーハ前提: 最低フレット以外が3指で押さえられること
@@ -108,14 +113,41 @@ const TabEngine = (() => {
     for (let h = Math.max(lo, maxF - 4); h <= Math.min(hi, minF + 1); h++) {
       let c = base;
       let ok = true;
-      for (const f of frets) {
+      let low = false;
+      let high = false;
+      for (const f of distinct) {
         if (f >= h && f <= h + 3) continue;
-        if (f === h + 4 || f === h - 1) c += W.stretch;
+        if (f === h + 4 && !distinct.includes(h + 3)) { high = true; c += W.stretch; }
+        else if (f === h - 1 && !distinct.includes(h)) { low = true; c += W.stretch; }
         else { ok = false; break; }
       }
-      if (ok) out.push({ hand: h, cost: c + W.handHeight * h });
+      if (ok && !(low && high)) out.push({ hand: h, cost: c + W.handHeight * h });
     }
     return out;
+  }
+
+  // 指の割り当てが人の手で可能か:
+  //   人差し指以外は、同じ指で押さえる弦が隣り合っていること（ミニセーハまで）
+  //   人差し指のセーハは、間の弦で開放弦を鳴らさないこと（セーハで押さえてしまう）
+  function fingersOk(sounded, hand, capo) {
+    const byFinger = new Map();
+    for (const p of sounded) {
+      if (p.f <= capo) continue;
+      const fg = clamp(p.f - hand + 1, 1, 4);
+      if (!byFinger.has(fg)) byFinger.set(fg, []);
+      byFinger.get(fg).push(p.s);
+    }
+    for (const [fg, ss] of byFinger) {
+      if (ss.length < 2) continue;
+      const lo = Math.min(...ss);
+      const hi = Math.max(...ss);
+      if (fg !== 1) {
+        if (hi - lo + 1 !== ss.length) return false;
+      } else if (sounded.some(p => p.f <= capo && p.s > lo && p.s < hi)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // イベントの押さえ方候補（状態）を列挙
@@ -163,6 +195,7 @@ const TabEngine = (() => {
         extra += W.stringSkip * ((hi - lo + 1) - ss.length);
       }
       for (const h of handOptions(fretted, capo)) {
+        if (sounded.length > 1 && !fingersOk(sounded, h.hand, capo)) continue;
         states.push({ picks: a.picks, hand: h.hand, tap: false, openOnly: !fretted.length, cost: a.cost + extra + h.cost });
       }
     }
