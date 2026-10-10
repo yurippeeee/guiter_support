@@ -1442,12 +1442,134 @@ function exportData() {
   setShareStatus(`エクスポートしました（コード${USER_SHAPES.length}件・進行${savedProgs.length}件）`);
 }
 
+// ------------------------------------------------------------
+// Phrase Swipe（スマホ作曲アプリ）の「ギター用に書き出し」を読み込む
+// 実音（MIDI番号・16分単位）のメロディと伴奏を、このアプリの形に変換する:
+//   コード → ディグリー＋クオリティ（押さえ方はコードDBから自動）
+//   メロディ → メロディー・ピアノロール（キーのメジャースケールの段）
+//   伴奏 → バッキング・ピアノロール（その押さえ方で同じ音が鳴る、高さの近い弦）
+// どちらも8分音符単位に丸める
+// ------------------------------------------------------------
+function convertPhraseSwipe(data) {
+  const sp = data.stepsPerBar || 16;
+  const toT = s => Math.floor(s * 8 / sp); // 16分 → 8分
+  const toDur = d => Math.max(1, Math.round(d * 8 / sp));
+  // マイナーは平行調のメジャーで表す（ディグリー表記はメジャー基準）
+  const keyMajor = ((data.key + (data.scale === 'minor' ? 3 : 0)) % 12 + 12) % 12;
+
+  // コード: 構成音が一致するクオリティを探す（無ければ3度で長/短）
+  const items = data.bars.map(b => {
+    const ivs = [...new Set(b.pcs.map(pc => (pc - b.rootPc + 12) % 12))].sort((x, y) => x - y).join(',');
+    let quality = Object.keys(CHORD_INTERVALS).find(q => CHORD_INTERVALS[q].slice().sort((x, y) => x - y).join(',') === ivs);
+    if (quality === undefined || !getVoicings(b.rootPc, quality).length) quality = ivs.split(',').includes('3') ? 'm' : '';
+    return { degree: (b.rootPc - keyMajor + 12) % 12, quality, voicing: 0, beats: 4 };
+  });
+
+  // メロディ: 2オクターブ（段0〜14）に一番多く収まるオクターブを選び、はみ出す音は折り返す
+  const base = 48 + keyMajor;
+  const rowOf = p => {
+    const semi = p - base;
+    const oct = Math.floor(semi / 12);
+    const pc = ((semi % 12) + 12) % 12;
+    let i = MAJOR_SEMIS.indexOf(pc);
+    if (i < 0) i = MAJOR_SEMIS.findIndex(x => x > pc) - 1; // スケール外は下の段へ（通常は来ない）
+    return oct * 7 + i;
+  };
+  const mel = (data.melody || []).slice().sort((a, b) => a.s - b.s);
+  let shift = 0, bestIn = -1;
+  for (const k of [0, -7, 7, -14, 14]) {
+    const n = mel.filter(m => { const r = rowOf(m.p) + k; return r >= 0 && r <= 14; }).length;
+    if (n > bestIn) { bestIn = n; shift = k; }
+  }
+  const melody = [];
+  for (const m of mel) {
+    let d = rowOf(m.p) + shift;
+    while (d < 0) d += 7;
+    while (d > 14) d -= 7;
+    const n = { t: toT(m.s), dur: toDur(m.d), d };
+    const prev = melody[melody.length - 1];
+    if (prev && prev.t === n.t) continue; // 8分に丸めて重なった音は先の音を残す
+    if (prev && prev.t + prev.dur > n.t) prev.dur = n.t - prev.t; // 単音なので前の音を切る
+    melody.push(n);
+  }
+
+  // 伴奏: 小節のコードの押さえ方で鳴る弦のうち、同じ音名で高さが一番近い弦へ（無ければ一番近い弦）
+  const backing = [];
+  const taken = new Set();
+  for (const a of (data.accomp || []).slice().sort((x, y) => x.s - y.s)) {
+    const bar = Math.floor(a.s / sp);
+    const item = items[bar];
+    if (!item) continue;
+    const v = getVoicings((keyMajor + item.degree) % 12, item.quality)[0];
+    if (!v) continue;
+    let best = -1, bestCost = Infinity;
+    for (let i = 0; i < 6; i++) {
+      if (v.frets[i] < 0) continue;
+      const midi = OPEN_MIDI[i] + v.frets[i];
+      const cost = Math.abs(midi - a.p) + ((midi - a.p) % 12 === 0 ? 0 : 100);
+      if (cost < bestCost) { bestCost = cost; best = i; }
+    }
+    if (best < 0) continue;
+    const t = toT(a.s);
+    const barEnd = (bar + 1) * 8; // バッキングはコード境界を越えない
+    const key = `${t}|${best}`;
+    if (taken.has(key)) continue;
+    taken.add(key);
+    backing.push({ t, dur: Math.max(1, Math.min(toDur(a.d), barEnd - t)), s: best });
+  }
+  // 同じ弦で次の音と重なる分を切る
+  for (const n of backing) {
+    const next = backing.filter(o => o.s === n.s && o.t > n.t).reduce((m, o) => Math.min(m, o.t), Infinity);
+    if (n.t + n.dur > next) n.dur = Math.max(1, next - n.t);
+  }
+
+  return {
+    keyMajor,
+    prog: {
+      id: Date.now() + Math.random(),
+      name: String(data.name || 'Phrase Swipe'),
+      items,
+      bpm: typeof data.bpm === 'number' ? data.bpm : 90,
+      pattern: 'custom', // バッキング・ピアノロールで鳴らす
+      melody: validMelodyNotes(melody),
+      backing: validBackingNotes(backing),
+    },
+  };
+}
+
+function importPhraseSwipe(data) {
+  if (!Array.isArray(data.bars) || !data.bars.length || typeof data.key !== 'number') {
+    setShareStatus('Phrase Swipe のファイルですが、中身が空のようです', true);
+    return;
+  }
+  const { keyMajor, prog } = convertPhraseSwipe(data);
+  const names = new Set(savedProgs.map(p => p.name));
+  let name = prog.name;
+  for (let n = 2; names.has(name); n++) name = `${prog.name}（${n}）`;
+  prog.name = name;
+  savedProgs.push(prog);
+  persistSavedProgs();
+  renderSavedProgs();
+  // そのまま開く（キーを合わせ、メロディー・バッキングを表示）
+  state.key = keyMajor;
+  state.melody.on = true;
+  state.backing.on = true;
+  if (el('melody-on')) el('melody-on').checked = true;
+  if (el('backing-on')) el('backing-on').checked = true;
+  loadProgression(prog);
+  setShareStatus(`Phrase Swipe から読み込みました: 「${name}」コード${prog.items.length}個・メロディー${prog.melody.length}音・バッキング${prog.backing.length}音（キー ${KEY_NAMES[keyMajor]}）`);
+}
+
 function importData(text) {
   let data;
   try {
     data = JSON.parse(text);
   } catch (e) {
     setShareStatus('読み込めませんでした（JSONファイルではありません）', true);
+    return;
+  }
+  if (data && data.app === 'phrase-swipe') {
+    importPhraseSwipe(data);
     return;
   }
   if (!data || (!Array.isArray(data.userShapes) && !Array.isArray(data.progressions))) {
