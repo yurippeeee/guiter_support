@@ -26,7 +26,9 @@ const TabEngine = (() => {
     approxOct: 12,    // 1オクターブずらした近似音
     drop: 25,         // 和音から省略した音
     dropDup: 3,       // 和音から省略した音（同じ音名がほかにあるので響きは変わらない）
-    reverse: 1.0,     // 指が弦をまたいで逆向きに開く形（低い弦ほど遠いフレット）1フレットあたり
+    reverse: 0.5,     // 低い弦ほど3フレット以上遠くなる逆向きの形（2フレットまでは C・G などの普通の形）
+    fingerOff: 0.4,   // フレット位置どおりの指（人差し指=手の位置）からずれる1本あたり
+    split: 0.2,       // 同じフレットを別々の指で押さえる（Gコードの6弦と1弦など）
     barre: 1.0,       // セーハ
     stringSkip: 0.4,  // 和音で間の弦をミュート
     handHeight: 0.03, // ハイポジションほど少し不利
@@ -119,28 +121,65 @@ const TabEngine = (() => {
     return out;
   }
 
-  // 指の割り当てが人の手で可能か:
-  //   人差し指以外は、同じ指で押さえる弦が隣り合っていること（ミニセーハまで）
-  //   人差し指のセーハは、間の弦で開放弦を鳴らさないこと（セーハで押さえてしまう）
-  function fingersOk(sounded, hand, capo) {
-    const byFinger = new Map();
-    for (const p of sounded) {
-      if (p.f <= capo) continue;
-      const fg = clamp(p.f - hand + 1, 1, 4);
-      if (!byFinger.has(fg)) byFinger.set(fg, []);
-      byFinger.get(fg).push(p.s);
+  // 指の割り当て（人差し指=1〜小指=4）。押さえられなければ null
+  //   同じフレットの音は、1本の指でまとめる（隣り合う弦。離れた弦は一番低いフレットのセーハだけ）か、別々の指で押さえる
+  //   指はフレットが低い方から順に（同じフレットを別々の指なら6弦側から）。手の位置 hand のフレットが人差し指の基本
+  //   セーハの間の弦で開放弦は鳴らせない
+  function assignFingers(sounded, hand, capo) {
+    const fr = sounded.filter(p => p.f > capo);
+    const fingers = new Map();
+    if (!fr.length) return { cost: 0, fingers };
+    const byFret = new Map();
+    for (const p of fr) {
+      if (!byFret.has(p.f)) byFret.set(p.f, []);
+      byFret.get(p.f).push(p);
     }
-    for (const [fg, ss] of byFinger) {
-      if (ss.length < 2) continue;
-      const lo = Math.min(...ss);
-      const hi = Math.max(...ss);
-      if (fg !== 1) {
-        if (hi - lo + 1 !== ss.length) return false;
-      } else if (sounded.some(p => p.f <= capo && p.s > lo && p.s < hi)) {
-        return false;
+    const groups = [...byFret.keys()].sort((a, b) => a - b).map(f => ({ f, items: byFret.get(f).sort((a, b) => a.s - b.s) }));
+    let best = null;
+    for (let mask = 0; mask < (1 << groups.length); mask++) {
+      let prev = 0;
+      let cost = 0;
+      let ok = true;
+      const fm = new Map();
+      for (let g = 0; g < groups.length && ok; g++) {
+        const { f, items } = groups[g];
+        const natural = f - hand + 1;
+        const split = (mask >> g) & 1;
+        if (split && items.length < 2) { ok = false; break; }
+        if (!split) {
+          if (items.length > 1) {
+            const ss = items.map(p => p.s);
+            const lo = Math.min(...ss);
+            const hi = Math.max(...ss);
+            if (hi - lo + 1 !== ss.length) {
+              // 離れた弦を1本の指で押さえるのはセーハ（一番低いフレット）だけ。間で開放弦は鳴らせない
+              if (g !== 0 || sounded.some(p => p.f <= capo && p.s > lo && p.s < hi)) { ok = false; break; }
+            }
+          }
+          const fg = Math.max(prev + 1, natural);
+          if (fg > REACH) { ok = false; break; }
+          // 離れた弦をまとめて押さえる（セーハ）のは人差し指だけ
+          if (items.length > 1 && fg !== 1) {
+            const ss = items.map(p => p.s);
+            if (Math.max(...ss) - Math.min(...ss) + 1 !== ss.length) { ok = false; break; }
+          }
+          cost += (fg - natural) * W.fingerOff;
+          for (const p of items) fm.set(p.note, fg);
+          prev = fg;
+        } else {
+          for (const p of items) {
+            const fg = Math.max(prev + 1, natural);
+            if (fg > REACH) { ok = false; break; }
+            cost += (fg - natural) * W.fingerOff;
+            fm.set(p.note, fg);
+            prev = fg;
+          }
+          cost += W.split * (items.length - 1);
+        }
       }
+      if (ok && (!best || cost < best.cost)) best = { cost, fingers: fm };
     }
-    return true;
+    return best;
   }
 
   // イベントの押さえ方候補（状態）を列挙
@@ -192,12 +231,13 @@ const TabEngine = (() => {
       for (let x = 0; x < fp.length; x++) {
         for (let y = 0; y < fp.length; y++) {
           const df = fp[y].f - fp[x].f;
-          if (df >= 2 && fp[y].s < fp[x].s) extra += W.reverse * (df - 1);
+          if (df >= 3 && fp[y].s < fp[x].s) extra += W.reverse * (df - 2);
         }
       }
       for (const h of handOptions(fretted, capo)) {
-        if (sounded.length > 1 && !fingersOk(sounded, h.hand, capo)) continue;
-        states.push({ picks: a.picks, hand: h.hand, tap: false, openOnly: !fretted.length, cost: a.cost + extra + h.cost });
+        const fa = assignFingers(sounded, h.hand, capo);
+        if (!fa) continue;
+        states.push({ picks: a.picks, hand: h.hand, tap: false, openOnly: !fretted.length, fingers: fa.fingers, cost: a.cost + extra + h.cost + fa.cost });
       }
     }
     // タッピング候補（単音のみ）: 左手はそのまま、右手で遠いフレットを叩く
@@ -313,6 +353,7 @@ const TabEngine = (() => {
   function fingerOf(st, p, capo) {
     if (st.tap) return 'T';
     if (p.f <= capo) return 0;
+    if (st.fingers && st.fingers.has(p.note)) return st.fingers.get(p.note);
     return clamp(p.f - st.hand + 1, 1, 4);
   }
 
