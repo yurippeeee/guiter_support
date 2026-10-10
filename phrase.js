@@ -477,6 +477,77 @@ function stopPhrase() {
 // ------------------------------------------------------------
 // 変更時の再計算・全体描画
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// Phrase Swipe（スマホ作曲アプリ）の「ギター用に書き出し」から読み込む
+// メロディ・伴奏を別々に選んで、このピアノロールに実音のまま入れる（16分単位で同じグリッド）
+// ------------------------------------------------------------
+let phPsData = null;
+
+function phPsParts(data) {
+  const acc = Array.isArray(data.accomp) ? data.accomp : [];
+  return {
+    melody: Array.isArray(data.melody) ? data.melody : [],
+    accomp: acc,
+    chords: acc.filter(a => a.inst !== 'bass'),
+    bass: acc.filter(a => a.inst === 'bass'),
+  };
+}
+
+// 読み込むファイルを受け取り、どのパートを入れるか選んでもらう
+function phOfferPhraseSwipe(data) {
+  phPsData = data;
+  const parts = phPsParts(data);
+  const bars = Array.isArray(data.bars) ? data.bars.length : 0;
+  el('ph-ps-title').textContent = `「${data.name || 'Phrase Swipe'}」${bars}小節: どれを読み込みますか？`;
+  el('ph-ps').querySelectorAll('button[data-part]').forEach(b => {
+    const list = parts[b.dataset.part];
+    if (list) b.disabled = !list.length;
+    if (list && !b.dataset.label) b.dataset.label = b.textContent;
+    if (list) b.textContent = `${b.dataset.label} ${list.length}音`;
+  });
+  el('ph-ps').hidden = false;
+}
+
+function phImportPart(part) {
+  const data = phPsData;
+  el('ph-ps').hidden = true;
+  phPsData = null;
+  if (!data || part === 'cancel') return;
+  const src = phPsParts(data)[part] || [];
+  const sp = data.stepsPerBar || PH_STEPS_PER_BAR;
+  const scale = PH_STEPS_PER_BAR / sp;
+  // 小節数は入る中で一番小さい設定（最大16小節。はみ出す分は入らない）
+  const total = Array.isArray(data.bars) && data.bars.length ? data.bars.length : 4;
+  ph.bars = [1, 2, 4, 8, 16].find(b => b >= total) || 16;
+  // マイナーは平行調のメジャーで（白鍵がそのキーの音になる）
+  ph.key = ((data.key + (data.scale === 'minor' ? 3 : 0)) % 12 + 12) % 12;
+  if (typeof data.bpm === 'number') ph.bpm = Math.min(240, Math.max(40, Math.round(data.bpm)));
+  ph.capo = 'auto';
+  const steps = phSteps();
+  const seen = new Set();
+  const notes = [];
+  for (const a of src) {
+    const t = Math.round(a.s * scale);
+    if (t >= steps) continue;
+    let r = a.p - phLow();
+    while (r < 0) r += 12; // 音域外はオクターブで折り返す
+    while (r >= PH_ROWS) r -= 12;
+    const k = `${t}|${r}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    notes.push({ t, dur: Math.max(1, Math.min(Math.round(a.d * scale), steps - t)), r });
+  }
+  ph.notes = notes;
+  phCursor = 0;
+  el('ph-key').value = ph.key;
+  el('ph-bpm').value = ph.bpm;
+  el('ph-bars').value = ph.bars;
+  el('ph-capo').value = 'auto';
+  phChanged();
+  const cut = total > 16 ? `（17小節目以降は入りません）` : '';
+  el('ph-summary').insertAdjacentHTML('afterbegin', `<span class="ph-ps-done">Phrase Swipe から ${notes.length}音を読み込みました${cut}</span>　`);
+}
+
 function phChanged() {
   if (phPlay) stopPhrase();
   savePhrase();
@@ -536,6 +607,20 @@ document.addEventListener('DOMContentLoaded', () => {
     phCursor = 0;
     phChanged();
   });
+
+  el('ph-ps-btn').addEventListener('click', () => el('ph-ps-file').click());
+  el('ph-ps-file').addEventListener('change', e => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    f.text().then(text => {
+      let data = null;
+      try { data = JSON.parse(text); } catch (err) { /* 下で案内 */ }
+      if (data && data.app === 'phrase-swipe') phOfferPhraseSwipe(data);
+      else alert('Phrase Swipe の「ギター用に書き出し」で作ったファイルを選んでください');
+    });
+  });
+  el('ph-ps').querySelectorAll('button[data-part]').forEach(b => b.addEventListener('click', () => phImportPart(b.dataset.part)));
 
   el('ph-play').addEventListener('click', () => (phPlay ? stopPhrase() : startPhrase()));
   el('ph-first').addEventListener('click', () => phSeek(0, false));

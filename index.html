@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ギターコード サポート</title>
-  <link rel="stylesheet" href="style.css?v=16">
+  <link rel="stylesheet" href="style.css?v=17">
 </head>
 <body>
   <header class="topbar">
@@ -188,8 +188,20 @@
         <div class="card-head">
           <h2>フレーズ→TAB（自動運指）</h2>
           <div class="card-tools">
+            <button id="ph-ps-btn" class="play-btn subtle">📥 Phrase Swipe から</button>
+            <input type="file" id="ph-ps-file" accept=".json,application/json" hidden>
             <button id="ph-clear" class="play-btn subtle">クリア</button>
           </div>
+        </div>
+        <div id="ph-ps" class="ph-ps" hidden>
+          <span id="ph-ps-title" class="ph-ps-title"></span>
+          <span class="ph-ps-choices">
+            <button class="play-btn" data-part="melody">メロディ</button>
+            <button class="play-btn" data-part="accomp">伴奏（和音＋ベース）</button>
+            <button class="play-btn" data-part="chords">伴奏（ベースなし）</button>
+            <button class="play-btn" data-part="bass">ベースだけ</button>
+            <button class="play-btn subtle" data-part="cancel">やめる</button>
+          </span>
         </div>
         <div class="prog-controls">
           <label>キー <select id="ph-key"></select></label>
@@ -265,9 +277,9 @@
     </div>
   </main>
 
-  <script src="chords.js?v=16"></script>
-  <script src="tab-engine.js?v=16"></script>
-  <script src="app.js?v=16"></script>
-  <script src="phrase.js?v=16"></script>
+  <script src="chords.js?v=17"></script>
+  <script src="tab-engine.js?v=17"></script>
+  <script src="app.js?v=17"></script>
+  <script src="phrase.js?v=17"></script>
 </body>
 </html>

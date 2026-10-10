@@ -666,3 +666,10 @@ body[data-tab="phrase"] .transport { display: none; }
 .ph-dot.open { fill: none; stroke: var(--accent-2); stroke-width: 2; }
 .ph-dot-label { fill: #1d1508; font-size: 12px; font-weight: 800; font-family: inherit; pointer-events: none; }
 .ph-dot-label.open { fill: var(--accent-2); }
+
+/* フレーズ→TAB: Phrase Swipe から読み込み */
+.ph-ps { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 4px; padding: 10px 12px; border-radius: 10px; background: rgba(120, 200, 160, 0.08); border: 1px solid rgba(120, 200, 160, 0.35); }
+.ph-ps[hidden] { display: none; }
+.ph-ps-title { font-weight: 700; }
+.ph-ps-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.ph-ps-done { color: #7bd3a8; }

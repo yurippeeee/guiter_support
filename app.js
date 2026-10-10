@@ -1488,6 +1488,13 @@ function importData(text) {
     setShareStatus('読み込めませんでした（JSONファイルではありません）', true);
     return;
   }
+  // Phrase Swipe の「ギター用に書き出し」はフレーズ→TAB で読み込む（メロディ・伴奏を選ぶ）
+  if (data && data.app === 'phrase-swipe') {
+    showTab('phrase');
+    phOfferPhraseSwipe(data);
+    setShareStatus('Phrase Swipe のファイルです。フレーズ→TAB タブで読み込むパートを選んでください');
+    return;
+  }
   if (!data || (!Array.isArray(data.userShapes) && !Array.isArray(data.progressions))) {
     setShareStatus('このアプリのエクスポートファイルではないようです', true);
     return;
