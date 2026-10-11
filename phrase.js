@@ -683,10 +683,14 @@ function stopPhrase() {
 // ------------------------------------------------------------
 let phPsData = null;
 
+// 音の値が数でないもの・負の位置は使わない（細工したファイルで固まったり壊れたりしないように）
+const phPsNotes = a => (Array.isArray(a) ? a : []).filter(n =>
+  n && typeof n === 'object' && [n.p, n.s, n.d].every(Number.isFinite) && n.s >= 0 && n.d > 0);
+
 function phPsParts(data) {
-  const acc = Array.isArray(data.accomp) ? data.accomp : [];
+  const acc = phPsNotes(data.accomp);
   return {
-    melody: Array.isArray(data.melody) ? data.melody : [],
+    melody: phPsNotes(data.melody),
     accomp: acc,
     chords: acc.filter(a => a.inst !== 'bass'),
     bass: acc.filter(a => a.inst === 'bass'),
@@ -698,7 +702,8 @@ function phOfferPhraseSwipe(data) {
   phPsData = data;
   const parts = phPsParts(data);
   const bars = Array.isArray(data.bars) ? data.bars.length : 0;
-  el('ph-ps-title').textContent = `「${data.name || 'Phrase Swipe'}」${bars}小節: どれを読み込みますか？`;
+  const name = typeof data.name === 'string' && data.name ? data.name.slice(0, 60) : 'Phrase Swipe';
+  el('ph-ps-title').textContent = `「${name}」${bars}小節: どれを読み込みますか？`;
   el('ph-ps').querySelectorAll('button[data-part]').forEach(b => {
     const list = parts[b.dataset.part];
     if (list) b.disabled = !list.length;
@@ -714,13 +719,14 @@ function phImportPart(part) {
   phPsData = null;
   if (!data || part === 'cancel') return;
   const src = phPsParts(data)[part] || [];
-  const sp = data.stepsPerBar || PH_STEPS_PER_BAR;
+  const sp = Number.isInteger(data.stepsPerBar) && data.stepsPerBar >= 1 && data.stepsPerBar <= 96 ? data.stepsPerBar : PH_STEPS_PER_BAR;
   const scale = PH_STEPS_PER_BAR / sp;
   // 小節数は入る中で一番小さい設定（最大16小節。はみ出す分は入らない）
   const total = Array.isArray(data.bars) && data.bars.length ? data.bars.length : 4;
   ph.bars = [1, 2, 4, 8, 16].find(b => b >= total) || 16;
   // マイナーは平行調のメジャーで（白鍵がそのキーの音になる）
-  ph.key = ((data.key + (data.scale === 'minor' ? 3 : 0)) % 12 + 12) % 12;
+  const key = Number.isInteger(data.key) ? data.key : 0;
+  ph.key = ((key + (data.scale === 'minor' ? 3 : 0)) % 12 + 12) % 12;
   if (typeof data.bpm === 'number') ph.bpm = Math.min(240, Math.max(40, Math.round(data.bpm)));
   ph.capo = 'auto';
   const steps = phSteps();
@@ -729,9 +735,10 @@ function phImportPart(part) {
   for (const a of src) {
     const t = Math.round(a.s * scale);
     if (t >= steps) continue;
-    let r = a.p - phLow();
-    while (r < 0) r += 12; // 音域外はオクターブで折り返す
-    while (r >= PH_ROWS) r -= 12;
+    // 音域外はオクターブで折り返す（とても大きな値でも1回の計算で）
+    let r = Math.round(a.p) - phLow();
+    if (r < 0) r += 12 * Math.ceil(-r / 12);
+    if (r >= PH_ROWS) r -= 12 * Math.ceil((r - PH_ROWS + 1) / 12);
     const k = `${t}|${r}`;
     if (seen.has(k)) continue;
     seen.add(k);

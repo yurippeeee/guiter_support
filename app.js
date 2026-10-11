@@ -20,16 +20,49 @@ function mergedFx(partial) {
   return out;
 }
 
+// 文字列を HTML（SVG）に埋め込むときは必ずエスケープする。
+// 共有ファイルから読み込んだ名前などにタグが入っていても、実行されずにただの文字として表示される
+function escHtml(v) {
+  return String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+// 保存データ・共有ファイルの値の検証（範囲外の値で表示が壊れたり、画面が固まったりしないように）
+const NAME_MAX = 40;    // 名前の長さの上限
+const QUALITY_MAX = 32; // コードの種類（m7・sus4 など）の長さの上限
+const validBpm = b => (typeof b === 'number' && Number.isFinite(b) ? Math.min(220, Math.max(40, Math.round(b))) : 90);
+const validName = (v, def) => (typeof v === 'string' && v.trim() ? v.slice(0, NAME_MAX) : def);
+
+// 登録コード: { root: 0〜11, quality, frets: 6本（-1=ミュート〜24）, name }。不正なら null
+function validShape(s) {
+  if (!s || !Number.isInteger(s.root) || s.root < 0 || s.root > 11) return null;
+  if (typeof s.quality !== 'string' || s.quality.length > QUALITY_MAX) return null;
+  if (!Array.isArray(s.frets) || s.frets.length !== 6) return null;
+  const frets = s.frets.map(Number);
+  if (!frets.every(f => Number.isInteger(f) && f >= -1 && f <= 24)) return null;
+  return { root: s.root, quality: s.quality, frets, name: validName(s.name, 'インポートコード') };
+}
+
+// 進行の1コード: { degree: 0〜11, quality, voicing, beats }。不正なら null
+function validProgItem(it) {
+  if (!it || !Number.isInteger(it.degree) || it.degree < 0 || it.degree >= DEGREES.length) return null;
+  if (typeof it.quality !== 'string' || it.quality.length > QUALITY_MAX) return null;
+  return {
+    degree: it.degree,
+    quality: it.quality,
+    voicing: Number.isInteger(it.voicing) && it.voicing >= 0 ? it.voicing : 0,
+    beats: validBeats(it.beats),
+  };
+}
+const validProgItems = a => (Array.isArray(a) ? a : []).map(validProgItem).filter(Boolean);
+
 function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (s && typeof s.key === 'number' && typeof s.quality === 'string') {
       if (typeof s.tuning !== 'number' || !TUNINGS[s.tuning]) s.tuning = 0;
       s.fx = mergedFx(s.fx);
-      s.progression = (Array.isArray(s.progression) ? s.progression : [])
-        .filter(p => p && typeof p.degree === 'number' && typeof p.quality === 'string')
-        .map(p => ({ ...p, beats: validBeats(p.beats) }));
-      if (typeof s.bpm !== 'number') s.bpm = 90;
+      s.progression = validProgItems(s.progression);
+      s.bpm = validBpm(s.bpm);
       s.loop = !!s.loop;
       if (typeof s.pattern !== 'string') s.pattern = 'simple';
       if (!s.scale || typeof s.scale.root !== 'number' || !SCALES.some(x => x.id === s.scale.type)) {
@@ -91,10 +124,8 @@ function loadUserShapes() {
     const a = JSON.parse(localStorage.getItem(USER_SHAPES_KEY));
     if (Array.isArray(a)) {
       for (const s of a) {
-        if (s && typeof s.root === 'number' && typeof s.quality === 'string' &&
-            Array.isArray(s.frets) && s.frets.length === 6) {
-          USER_SHAPES.push(s);
-        }
+        const shape = validShape(s);
+        if (shape) USER_SHAPES.push({ ...shape, id: typeof s.id === 'number' ? s.id : Date.now() + Math.random() });
       }
     }
   } catch (e) { /* 破損時は無視 */ }
@@ -567,7 +598,7 @@ function renderVoicings(voicings) {
   voicings.forEach((v, i) => {
     const card = document.createElement('div');
     card.className = 'voicing-card' + (i === state.voicing ? ' active' : '') + (v.user ? ' user' : '');
-    card.innerHTML = miniDiagram(v) + `<div class="voicing-name">${v.name}</div>`;
+    card.innerHTML = miniDiagram(v) + `<div class="voicing-name">${escHtml(v.name)}</div>`;
     if (v.user) {
       const del = document.createElement('button');
       del.className = 'del-btn';
@@ -778,7 +809,9 @@ function loadSavedProgs() {
   try {
     const a = JSON.parse(localStorage.getItem(PROGS_KEY));
     if (Array.isArray(a)) {
-      savedProgs = a.filter(p => p && typeof p.name === 'string' && Array.isArray(p.items));
+      savedProgs = a.filter(p => p && typeof p.name === 'string' && Array.isArray(p.items))
+        .map(p => ({ ...p, name: validName(p.name, '進行'), items: validProgItems(p.items), bpm: validBpm(p.bpm) }))
+        .filter(p => p.items.length);
     }
   } catch (e) { /* 破損時は無視 */ }
 }
@@ -812,7 +845,7 @@ function loadProgression(p) {
   state.progression = JSON.parse(JSON.stringify(p.items));
   state.melody.notes = validMelodyNotes(p.melody);
   state.backing.notes = validBackingNotes(p.backing);
-  if (typeof p.bpm === 'number') state.bpm = p.bpm;
+  if (typeof p.bpm === 'number') state.bpm = validBpm(p.bpm);
   if (typeof p.pattern === 'string' && STRUM_PATTERNS.some(x => x.id === p.pattern)) state.pattern = p.pattern;
   el('prog-bpm').value = state.bpm;
   el('prog-pattern').value = state.pattern;
@@ -1004,7 +1037,7 @@ function renderMelody() {
   for (const seg of segs) {
     s += `<rect x="${xOf(seg.start)}" y="2" width="${seg.steps * MR.cw - 2}" height="${MR.top - 6}" rx="4" fill="#2a3040"/>`;
     if (seg.item) {
-      s += `<text x="${xOf(seg.start) + 6}" y="${MR.top - 10}" class="mel-chord-label">${progLabel(seg.item)}</text>`;
+      s += `<text x="${xOf(seg.start) + 6}" y="${MR.top - 10}" class="mel-chord-label">${escHtml(progLabel(seg.item))}</text>`;
     }
   }
   // コード境界のドラッグハンドル（8分単位で境界を前後に動かせる）
@@ -1246,7 +1279,7 @@ function renderBacking() {
   for (const seg of segs) {
     s += `<rect x="${xOf(seg.start)}" y="2" width="${seg.steps * MR.cw - 2}" height="${MR.top - 6}" rx="4" fill="#2a3040"/>`;
     if (seg.item) {
-      s += `<text x="${xOf(seg.start) + 6}" y="${MR.top - 10}" class="mel-chord-label">${progLabel(seg.item)}</text>`;
+      s += `<text x="${xOf(seg.start) + 6}" y="${MR.top - 10}" class="mel-chord-label">${escHtml(progLabel(seg.item))}</text>`;
     }
   }
   // コード境界のドラッグハンドル（8分単位で境界を前後に動かせる）
@@ -1504,10 +1537,9 @@ function importData(text) {
   let addedShapes = 0, skipped = 0;
   const shapeKey = s => `${s.root}|${s.quality}|${s.frets.join(',')}`;
   const existingShapes = new Set(USER_SHAPES.map(shapeKey));
-  for (const s of (data.userShapes || [])) {
-    if (!(s && typeof s.root === 'number' && typeof s.quality === 'string' &&
-          Array.isArray(s.frets) && s.frets.length === 6)) continue;
-    const shape = { root: s.root, quality: s.quality, frets: s.frets.map(Number), name: String(s.name || 'インポートコード') };
+  for (const s of (Array.isArray(data.userShapes) ? data.userShapes : [])) {
+    const shape = validShape(s);
+    if (!shape) continue;
     if (existingShapes.has(shapeKey(shape))) { skipped++; continue; }
     shape.id = Date.now() + Math.random();
     USER_SHAPES.push(shape);
@@ -1518,16 +1550,9 @@ function importData(text) {
   // 進行のマージ（同名・同内容はスキップ、同名で別内容は連番リネーム）
   let addedProgs = 0;
   const names = new Set(savedProgs.map(p => p.name));
-  for (const p of (data.progressions || [])) {
+  for (const p of (Array.isArray(data.progressions) ? data.progressions : [])) {
     if (!(p && typeof p.name === 'string' && Array.isArray(p.items))) continue;
-    const items = p.items
-      .filter(it => it && typeof it.degree === 'number' && typeof it.quality === 'string')
-      .map(it => ({
-        degree: it.degree,
-        quality: it.quality,
-        voicing: typeof it.voicing === 'number' ? it.voicing : 0,
-        beats: validBeats(it.beats),
-      }));
+    const items = validProgItems(p.items);
     if (!items.length) continue;
     const melody = validMelodyNotes(p.melody);
     const backing = validBackingNotes(p.backing);
@@ -1539,14 +1564,15 @@ function importData(text) {
       skipped++;
       continue;
     }
-    let name = p.name;
-    for (let n = 2; names.has(name); n++) name = `${p.name}（${n}）`;
+    const base = validName(p.name, '進行');
+    let name = base;
+    for (let n = 2; names.has(name); n++) name = `${base}（${n}）`;
     savedProgs.push({
       id: Date.now() + Math.random(),
       name,
       items,
-      bpm: typeof p.bpm === 'number' ? p.bpm : 90,
-      pattern: typeof p.pattern === 'string' ? p.pattern : 'simple',
+      bpm: validBpm(p.bpm),
+      pattern: STRUM_PATTERNS.some(x => x.id === p.pattern) ? p.pattern : 'simple',
       melody,
       backing,
     });
